@@ -22,7 +22,7 @@ const envSchema = z.object({
   AUTH0_MANAGEMENT_CLIENT_SECRET: z.string().optional(),
   AUTH0_MANAGEMENT_API_SCOPE: z
     .string()
-    .default("read:federated_connections_tokensets"),
+    .default("read:users read:user_idp_tokens"),
   AUTH0_TOKEN_VAULT_CONNECTION: z.string().optional(),
   AUTH0_TOKEN_VAULT_PROVIDER: z.string().default("google-oauth2"),
   AUTH0_TOKEN_VAULT_ACCOUNT_ID: z.string().optional(),

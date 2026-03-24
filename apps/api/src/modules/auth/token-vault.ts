@@ -24,6 +24,18 @@ type TokenVaultTokenset = {
   last_used_at?: number;
 };
 
+type IdentityProviderIdentity = {
+  connection?: string;
+  provider?: string;
+  access_token?: string;
+  refresh_token?: string;
+};
+
+type ManagementUserProfile = {
+  user_id: string;
+  identities?: IdentityProviderIdentity[];
+};
+
 function normalizeAuth0Domain(domain: string) {
   return domain.startsWith("http") ? domain : `https://${domain}`;
 }
@@ -124,6 +136,32 @@ export async function listUserTokenSets(
   return (await response.json()) as TokenVaultTokenset[];
 }
 
+async function getManagementUserProfile(
+  userId: string,
+  runtimeEnv: AppEnv = env,
+): Promise<ManagementUserProfile> {
+  const accessToken = await getManagementApiAccessToken(runtimeEnv);
+  const auth0Domain = normalizeAuth0Domain(runtimeEnv.AUTH0_DOMAIN!);
+  const response = await fetch(
+    `${auth0Domain}/api/v2/users/${encodeURIComponent(
+      userId,
+    )}?fields=user_id,identities&include_fields=true`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch Auth0 user profile: ${response.status} ${response.statusText}`,
+    );
+  }
+
+  return (await response.json()) as ManagementUserProfile;
+}
+
 export async function getGmailTokenVaultStatus(
   userId: string | undefined,
   runtimeEnv: AppEnv = env,
@@ -198,18 +236,49 @@ export async function getGmailTokenVaultStatus(
           : "No Gmail tokenset was found for this user yet.",
     };
   } catch (error) {
-    return {
-      connection: runtimeEnv.AUTH0_GMAIL_CONNECTION,
-      requiredScopes,
-      grantedScopes: [] as string[],
-      missingScopes: requiredScopes,
-      connected: false,
-      liveReady: false,
-      tokensets: [] as TokenVaultTokenset[],
-      managementApiConfigured: true,
-      tokenVaultConfigured: tokenVaultStatus.configured,
-      note: error instanceof Error ? error.message : "Unable to inspect tokensets.",
-    };
+    try {
+      const profile = await getManagementUserProfile(userId, runtimeEnv);
+      const gmailIdentity = profile.identities?.find(
+        (identity) =>
+          identity.connection === runtimeEnv.AUTH0_GMAIL_CONNECTION ||
+          identity.provider === runtimeEnv.AUTH0_GMAIL_CONNECTION,
+      );
+
+      const connected = Boolean(gmailIdentity?.access_token || gmailIdentity?.refresh_token);
+
+      return {
+        connection: runtimeEnv.AUTH0_GMAIL_CONNECTION,
+        requiredScopes,
+        grantedScopes: [] as string[],
+        missingScopes: [] as string[],
+        connected,
+        liveReady: connected,
+        tokensets: [] as TokenVaultTokenset[],
+        managementApiConfigured: true,
+        tokenVaultConfigured: tokenVaultStatus.configured,
+        note: connected
+          ? "Fell back to Auth0 identity-provider token inspection. Gmail appears connected, but scope-level Token Vault verification is not available in this tenant."
+          : error instanceof Error
+            ? `${error.message} Also could not find a Gmail identity token on the Auth0 user profile.`
+            : "Unable to inspect Token Vault tokensets or identity-provider tokens.",
+      };
+    } catch (fallbackError) {
+      return {
+        connection: runtimeEnv.AUTH0_GMAIL_CONNECTION,
+        requiredScopes,
+        grantedScopes: [] as string[],
+        missingScopes: requiredScopes,
+        connected: false,
+        liveReady: false,
+        tokensets: [] as TokenVaultTokenset[],
+        managementApiConfigured: true,
+        tokenVaultConfigured: tokenVaultStatus.configured,
+        note:
+          fallbackError instanceof Error
+            ? fallbackError.message
+            : "Unable to inspect tokensets.",
+      };
+    }
   }
 }
 

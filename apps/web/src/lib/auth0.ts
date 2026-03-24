@@ -37,6 +37,8 @@ const gmailScopes = (
 
 export const gmailConnectUrl = `/auth/login?${new URLSearchParams({
   connection: gmailConnection,
+  access_type: "offline",
+  prompt: "consent",
   connection_scope: gmailScopes.join(","),
   returnTo: "/",
 }).toString()}`;
