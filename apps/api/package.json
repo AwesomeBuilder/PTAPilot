@@ -15,6 +15,7 @@
     "@google/genai": "^1.46.0",
     "@pta-pilot/shared": "workspace:*",
     "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "firebase-admin": "^13.7.0",
     "googleapis": "^171.4.0",
