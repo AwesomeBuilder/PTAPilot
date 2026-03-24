@@ -2,7 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
 
-const apiBaseUrl = process.env.PTA_API_BASE_URL ?? "http://localhost:8080";
+const apiBaseUrl = process.env.PTA_API_BASE_URL ?? "http://localhost:8081";
 const repoRoot = path.join(
   fileURLToPath(new URL(".", import.meta.url)),
   "..",

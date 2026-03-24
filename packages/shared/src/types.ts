@@ -154,6 +154,16 @@ export interface ApprovalAction {
   requiresHumanApproval: true;
   createdAt: string;
   updatedAt: string;
+  gmailExecution?: {
+    deliveryPath: "mock" | "token_vault" | "identity_provider";
+    lastAction: "draft_saved" | "sent";
+    draftId?: string;
+    draftMessageId?: string;
+    threadId?: string;
+    sentMessageId?: string;
+    note?: string;
+    updatedAt: string;
+  };
 }
 
 export interface AuditEntry {

@@ -6,8 +6,8 @@ The repo is optimized for a believable demo first:
 
 - Mock mode works end to end out of the box.
 - Auth0 login can now generate a real Google/Gmail login URL with Gmail `connection_scope` values.
-- Backend auth status can inspect Gmail tokensets through the Auth0 Management API when configured.
-- Gmail live mode is scaffolded around Auth0 Token Vault and safe server-side token exchange boundaries.
+- Backend auth status can inspect Gmail tokensets through the Auth0 Management API when configured and now performs a live Gmail API reachability probe.
+- Gmail live mode now syncs recent threads, fetches reminder-thread replies, creates drafts, and sends Gmail messages behind approval when the delegated Gmail API path is actually reachable.
 - Membership Toolkit is abstracted behind an adapter interface and fully functional in mock mode.
 - Every send, publish, or schedule action requires explicit approval.
 
@@ -69,7 +69,7 @@ pnpm --filter api build
 pnpm dev
 ```
 
-The dev smoke test returned `200 OK` from `http://localhost:3000` and a healthy JSON response from `http://localhost:8080/health`.
+The dev smoke test returned `200 OK` from `http://localhost:3000` and a healthy JSON response from `http://localhost:8081/health`.
 
 ## What Works Now
 
@@ -102,12 +102,23 @@ The dev smoke test returned `200 OK` from `http://localhost:3000` and a healthy 
   - live Gmail connect / reconnect URL
   - granted versus missing Gmail scopes
   - Auth0 Management API readiness for tokenset inspection
+  - live Gmail action path and Gmail API probe status
+- Live Gmail flow when the delegated Gmail API path is available:
+  - sync recent Gmail threads into the inbox on bootstrap / ingest
+  - fetch replies from the PTA reminder thread
+  - create or update a Gmail draft when saving Gmail-backed approval edits
+  - send a Gmail message only after explicit approval
 - Audit log view and right-rail action history
 - Backend routes with JSON state persistence at `apps/api/data/runtime-state.json`
 
 ## Auth0 and Token Vault Setup
 
-Use the official Auth0 docs when wiring the live flow because Token Vault is still evolving. The current scaffold assumes:
+Use the official Auth0 docs when wiring the live flow because Token Vault is still evolving. The current repo now has two distinct Gmail paths:
+
+1. Preferred future path: real Auth0 Token Vault access-token exchange.
+2. Current demo path: Auth0 Management API identity-provider token fallback when the Auth0 user profile exposes a Google access token.
+
+The current scaffold assumes:
 
 1. Create or reuse an Auth0 Regular Web Application.
 2. Set Allowed Callback URLs to `http://localhost:3000/auth/callback`.
@@ -118,14 +129,19 @@ Use the official Auth0 docs when wiring the live flow because Token Vault is sti
 7. Create a Machine to Machine application for the Auth0 Management API and grant at least `read:federated_connections_tokensets`.
 8. Put the Management API client ID and secret into `apps/api/.env`.
 9. Use the Setup screen button to log in or reconnect Gmail with the requested `connection_scope` values.
-10. Implement the final secure token exchange in `apps/api/src/modules/auth/token-vault.ts` and wire the live Gmail adapter.
+10. Enable the Gmail API on the Google Cloud project behind the Auth0 Google connection.
+11. If you want to move off the fallback path, add a real Auth0 audience / subject-token flow and finish the Token Vault exchange in `apps/api/src/modules/auth/token-vault.ts`.
 
 Notes:
 
 - The live Gmail adapter is intentionally server-only.
 - The app does not store long-lived Google refresh tokens itself.
 - The current dashboard can run without Auth0 env vars; it falls back to guest/demo mode cleanly.
-- If the Management API credentials are present, the Setup screen will show real granted/missing Gmail scopes for the logged-in Auth0 user.
+- If the Management API credentials are present, the Setup screen will show real granted/missing Gmail scopes for the logged-in Auth0 user when the tenant exposes tokensets.
+- This repo does not yet perform a verified Token Vault token exchange. The live Gmail action path currently uses the Auth0 Management API to inspect the user identity and reuses the exposed Google access token when available.
+- The Setup screen now marks Gmail as not live-ready if Google rejects the delegated token, including the common case where `gmail.googleapis.com` is disabled on the Google project behind the Auth0 connection.
+- Saving the Wednesday board-review approval in live mode creates or updates a Gmail draft. Approving that action sends it.
+- Live Gmail send is intentionally limited to the board-review email right now because the repo does not have a real PTA member recipient list. The Monday member reminder remains mock-only unless you add explicit recipients.
 
 ## Gemini / Vertex Setup
 
@@ -159,13 +175,17 @@ The backend models each of those as an approval item and the UI keeps them visib
 4. Open Actions Review and edit the Wednesday board-review email copy.
 5. Approve the Thursday teacher release or Sunday parent scheduling action.
 6. Open Audit Log and show the resulting approval and execution history.
-7. If live Auth0 + Gmail are configured, log in and show the Token Vault-backed Gmail status path.
+7. If live Auth0 + Gmail are configured, log in and show the Gmail status card:
+   - if Gmail is ready, save the Wednesday board-review approval to create a live draft
+   - approve the Wednesday board-review email to send it
+   - if Gmail is not ready, the status note will explain the exact blocker
 
 ## Important Product Behaviors
 
 - PTA Pilot should ask for missing information before high-impact actions.
 - After approval, execution should be smooth and not ask for redundant confirmations.
 - Gmail schedule-send is currently modeled as an app-side scheduled action. The official Gmail docs expose create-draft and send flows; I infer there is no native schedule-send endpoint, so the app intentionally emulates scheduling.
+- Gmail live send is explicit and approval-gated. Draft creation is allowed before approval, but send only happens from the approval step.
 
 ## Hackathon Fit
 
@@ -186,5 +206,9 @@ Use [TODO.md](TODO.md) for the post-hackathon backlog and [Agent.md](Agent.md) f
 - [Auth0 Next.js quickstart](https://dev.auth0.com/docs/quickstart/webapp/nextjs)
 - [Gmail API send guide](https://developers.google.com/workspace/gmail/api/guides/sending)
 - [Gmail drafts.create reference](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.drafts/create)
+- [Gmail drafts.update reference](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.drafts/update)
+- [Gmail drafts.send reference](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.drafts/send)
 - [Gmail messages.send reference](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/send)
+- [Gmail threads.list reference](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.threads/list)
+- [Gmail threads.get reference](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.threads/get)
 - [Google Vertex AI Node.js overview](https://cloud.google.com/vertex-ai/generative-ai/docs/reference/nodejs/latest/overview)

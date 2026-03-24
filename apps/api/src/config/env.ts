@@ -9,9 +9,9 @@ const defaultStatePath = fileURLToPath(
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  PORT: z.coerce.number().default(8080),
+  PORT: z.coerce.number().default(8081),
   CORS_ORIGIN: z.string().default("http://localhost:3000"),
-  APP_BASE_URL: z.string().default("http://localhost:8080"),
+  APP_BASE_URL: z.string().default("http://localhost:8081"),
   AUTH0_DOMAIN: z.string().optional(),
   AUTH0_CLIENT_ID: z.string().optional(),
   AUTH0_CLIENT_SECRET: z.string().optional(),

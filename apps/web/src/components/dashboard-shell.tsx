@@ -91,6 +91,7 @@ type AuthStatusResponse = {
     liveReady: boolean;
     managementApiConfigured: boolean;
     tokenVaultConfigured: boolean;
+    actionPath: "identity_provider" | "token_vault" | "unavailable";
     note: string;
   };
 };
@@ -155,6 +156,15 @@ function formatDateTime(value: string | undefined) {
   return format(new Date(value), "EEE, MMM d • h:mm a");
 }
 
+function withUserQuery(path: string, userId?: string | null) {
+  if (!userId) {
+    return path;
+  }
+
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}userId=${encodeURIComponent(userId)}`;
+}
+
 export function DashboardShell({
   authEnabled,
   gmailConnectUrl,
@@ -199,7 +209,7 @@ export function DashboardShell({
 
   useEffect(() => {
     void refreshSnapshot();
-  }, []);
+  }, [user?.sub]);
 
   useEffect(() => {
     setSetupDraft(createSetupDraft(snapshot));
@@ -208,7 +218,9 @@ export function DashboardShell({
 
   async function refreshSnapshot() {
     try {
-      const nextState = await fetchJson<DemoState>("/api/bootstrap");
+      const nextState = await fetchJson<DemoState>(
+        withUserQuery("/api/bootstrap", user?.sub),
+      );
       startTransition(() => {
         setSnapshot(nextState);
       });
@@ -232,9 +244,8 @@ export function DashboardShell({
     }
 
     try {
-      const query = user?.sub ? `?userId=${encodeURIComponent(user.sub)}` : "";
       const nextStatus = await fetchJson<AuthStatusResponse>(
-        `/api/auth/status${query}`,
+        withUserQuery("/api/auth/status", user?.sub),
       );
       setAuthStatus(nextStatus);
     } catch {
@@ -289,7 +300,7 @@ export function DashboardShell({
     await runMutation(
       "Ingesting Gmail replies and mock messages",
       () =>
-        fetchJson<DemoState>("/api/inbox/ingest", {
+        fetchJson<DemoState>(withUserQuery("/api/inbox/ingest", user?.sub), {
           method: "POST",
         }),
       "Inbox updates were ingested and the newsletter draft was refreshed.",
@@ -337,10 +348,13 @@ export function DashboardShell({
     await runMutation(
       "Saving approval edits",
       () =>
-        fetchJson<DemoState>(`/api/actions/${actionId}/edit`, {
+        fetchJson<DemoState>(
+          withUserQuery(`/api/actions/${actionId}/edit`, user?.sub),
+          {
           method: "POST",
           body: JSON.stringify(draft),
-        }),
+          },
+        ),
       "Approval draft updated.",
     );
   }
@@ -349,9 +363,12 @@ export function DashboardShell({
     await runMutation(
       "Approving risky action",
       () =>
-        fetchJson<DemoState>(`/api/actions/${actionId}/approve`, {
+        fetchJson<DemoState>(
+          withUserQuery(`/api/actions/${actionId}/approve`, user?.sub),
+          {
           method: "POST",
-        }),
+          },
+        ),
       "Action approved. Execution can proceed without additional blockers.",
     );
   }
@@ -819,6 +836,14 @@ function SetupView({
                     {authStatus?.managementApi.configured
                       ? "configured"
                       : "not configured"}
+                  </Badge>
+                  <Badge variant="outline">
+                    Path{" "}
+                    {authStatus?.gmail.actionPath === "identity_provider"
+                      ? "identity fallback"
+                      : authStatus?.gmail.actionPath === "token_vault"
+                        ? "token vault"
+                        : "unavailable"}
                   </Badge>
                 </div>
                 <p className="text-sm text-muted-foreground">
@@ -1451,6 +1476,23 @@ function ActionsView({
                   </div>
                 ) : null}
               </div>
+              {approval.gmailExecution ? (
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50/80 p-4 text-sm text-emerald-950">
+                  <p className="font-medium">
+                    Gmail {approval.gmailExecution.lastAction === "sent" ? "send" : "draft"}{" "}
+                    synced via{" "}
+                    {approval.gmailExecution.deliveryPath === "identity_provider"
+                      ? "Auth0 identity fallback"
+                      : approval.gmailExecution.deliveryPath}
+                  </p>
+                  <p className="mt-1 text-xs text-emerald-900/80">
+                    {approval.gmailExecution.note ?? "Live Gmail metadata is available for this action."}
+                  </p>
+                  <p className="mt-2 text-xs text-emerald-900/80">
+                    Updated {formatDateTime(approval.gmailExecution.updatedAt)}
+                  </p>
+                </div>
+              ) : null}
               <div className="space-y-2">
                 <Label htmlFor={`${approval.id}-subject`}>Subject</Label>
                 <Input

@@ -1,4 +1,4 @@
-import { Router, type Router as ExpressRouter } from "express";
+import { Router, type Request, type Router as ExpressRouter } from "express";
 import {
   addMockMessageSchema,
   approvalEditSchema,
@@ -6,12 +6,16 @@ import {
 } from "@pta-pilot/shared";
 import type { DemoService } from "./demo.service";
 
+function getUserId(request: Request) {
+  return typeof request.query.userId === "string" ? request.query.userId : undefined;
+}
+
 export function createDemoRouter(service: DemoService): ExpressRouter {
   const router = Router();
 
-  router.get("/bootstrap", async (_request, response, next) => {
+  router.get("/bootstrap", async (request, response, next) => {
     try {
-      response.json(await service.getState());
+      response.json(await service.getState(getUserId(request)));
     } catch (error) {
       next(error);
     }
@@ -45,7 +49,7 @@ export function createDemoRouter(service: DemoService): ExpressRouter {
 
   router.post("/inbox/ingest", async (_request, response, next) => {
     try {
-      response.json(await service.ingestUpdates());
+      response.json(await service.ingestUpdates(getUserId(_request)));
     } catch (error) {
       next(error);
     }
@@ -75,7 +79,13 @@ export function createDemoRouter(service: DemoService): ExpressRouter {
   router.post("/actions/:actionId/edit", async (request, response, next) => {
     try {
       const payload = approvalEditSchema.parse(request.body);
-      response.json(await service.editApproval(request.params.actionId, payload));
+      response.json(
+        await service.editApproval(
+          request.params.actionId,
+          payload,
+          getUserId(request),
+        ),
+      );
     } catch (error) {
       next(error);
     }
@@ -83,7 +93,9 @@ export function createDemoRouter(service: DemoService): ExpressRouter {
 
   router.post("/actions/:actionId/approve", async (request, response, next) => {
     try {
-      response.json(await service.approveAction(request.params.actionId));
+      response.json(
+        await service.approveAction(request.params.actionId, getUserId(request)),
+      );
     } catch (error) {
       next(error);
     }
