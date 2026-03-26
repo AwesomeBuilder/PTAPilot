@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, DM_Sans } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
@@ -18,6 +18,14 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "PTA Pilot",
   description: "AI-assisted PTA communications workflow demo with Auth0 Token Vault.",
+  icons: {
+    icon: "/pta-pilot-logo.png",
+    apple: "/pta-pilot-logo.png",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#040a12",
 };
 
 export default function RootLayout({
@@ -37,7 +45,7 @@ export default function RootLayout({
         dmSans.variable,
       )}
     >
-      <body className="min-h-full bg-[radial-gradient(circle_at_top,_rgba(80,76,255,0.12),_transparent_32%),linear-gradient(180deg,_rgba(255,255,255,0.94),_rgba(244,246,252,1))] text-foreground">
+      <body className="min-h-full bg-background text-foreground">
         {children}
       </body>
     </html>

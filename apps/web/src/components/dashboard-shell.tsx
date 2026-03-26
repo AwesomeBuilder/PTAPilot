@@ -3,6 +3,7 @@
 
 import {
   startTransition,
+  useCallback,
   useEffect,
   useEffectEvent,
   useRef,
@@ -23,7 +24,6 @@ import {
   ListChecks,
   NotePencil,
   ShieldCheck,
-  Sparkle,
 } from "@phosphor-icons/react";
 import type {
   AddMockMessageInput,
@@ -127,6 +127,25 @@ const viewDefinitions: Array<{
   { key: "actions", label: "Actions Review", icon: ListChecks },
   { key: "audit", label: "Audit Log", icon: ShieldCheck },
 ];
+
+function BrandLogo({
+  className,
+  alt = "PTA Pilot logo",
+}: {
+  className?: string;
+  alt?: string;
+}) {
+  return (
+    <img
+      src="/pta-pilot-logo.png"
+      alt={alt}
+      className={cn(
+        "rounded-[1.4rem] border border-white/10 bg-[#02060d] object-cover shadow-[0_0_0_1px_rgba(255,255,255,0.03),0_20px_48px_rgba(45,200,255,0.16)]",
+        className,
+      )}
+    />
+  );
+}
 
 function createSetupDraft(state: DemoState): SetupDraft {
   return {
@@ -263,16 +282,7 @@ export function DashboardShell({
     imageUrl: "",
   });
 
-  useEffect(() => {
-    void refreshSnapshot();
-  }, [user?.sub]);
-
-  useEffect(() => {
-    setSetupDraft(createSetupDraft(snapshot));
-    setApprovalDrafts(createApprovalDrafts(snapshot.approvals));
-  }, [snapshot]);
-
-  async function refreshSnapshot() {
+  const refreshSnapshot = useCallback(async () => {
     try {
       const nextState = await fetchJson<DemoState>(
         withUserQuery("/api/bootstrap", user?.sub),
@@ -291,7 +301,16 @@ export function DashboardShell({
         message: `Backend unavailable, showing seeded mock data instead. ${message}`,
       });
     }
-  }
+  }, [user?.sub]);
+
+  useEffect(() => {
+    void refreshSnapshot();
+  }, [refreshSnapshot]);
+
+  useEffect(() => {
+    setSetupDraft(createSetupDraft(snapshot));
+    setApprovalDrafts(createApprovalDrafts(snapshot.approvals));
+  }, [snapshot]);
 
   const refreshAuthStatus = useEffectEvent(async () => {
     if (!authEnabled) {
@@ -513,16 +532,22 @@ export function DashboardShell({
   }
 
   return (
-    <div className="min-h-screen px-4 py-4 sm:px-6 lg:px-8">
-      <div className="mx-auto grid max-w-[1680px] gap-4 xl:grid-cols-[280px_minmax(0,1fr)_360px]">
+    <div className="relative min-h-screen overflow-hidden px-4 py-4 sm:px-6 lg:px-8">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-80 bg-[radial-gradient(circle_at_16%_12%,rgba(45,200,255,0.18),transparent_32%),radial-gradient(circle_at_84%_8%,rgba(73,112,255,0.2),transparent_28%)]" />
+      <div className="relative mx-auto grid max-w-[1680px] gap-4 xl:grid-cols-[280px_minmax(0,1fr)_360px]">
         <aside className="xl:sticky xl:top-4 xl:self-start">
-          <Card className="border border-white/40 bg-white/75 backdrop-blur">
+          <Card className="brand-panel">
             <CardHeader>
               <CardTitle className="flex items-center gap-3 text-xl">
-                <div className="flex size-11 items-center justify-center rounded-2xl bg-primary/15 text-primary">
-                  <Sparkle className="size-5" />
+                <BrandLogo className="size-14 p-1.5" />
+                <div className="space-y-1">
+                  <span className="block text-xl font-semibold tracking-tight">
+                    PTA Pilot
+                  </span>
+                  <span className="block text-[0.68rem] font-semibold tracking-[0.34em] text-primary/80 uppercase">
+                    AI Comms Control Tower
+                  </span>
                 </div>
-                PTA Pilot
               </CardTitle>
               <CardDescription>
                 AI PTA communications agent with explicit approvals before send,
@@ -616,9 +641,16 @@ export function DashboardShell({
         </aside>
 
         <main ref={mainRef} className="space-y-4">
-          <Card className="border border-white/40 bg-white/80 backdrop-blur">
+          <Card className="brand-panel">
             <CardHeader>
               <CardTitle className="flex flex-wrap items-center gap-3">
+                <span className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-[0.68rem] font-semibold tracking-[0.28em] text-primary uppercase">
+                  <BrandLogo
+                    className="size-5 rounded-full border-0 bg-transparent p-0 shadow-none"
+                    alt=""
+                  />
+                  PTA Pilot
+                </span>
                 <span>Believable hackathon demo flow</span>
                 <Badge variant={effectiveTokenVaultConfigured ? "default" : "secondary"}>
                   Token Vault {effectiveTokenVaultConfigured ? "configured" : "scaffolded"}
@@ -643,10 +675,13 @@ export function DashboardShell({
                 {notice ? (
                   <div
                     className={cn(
-                      "inline-flex rounded-full px-3 py-1 text-xs font-medium",
-                      notice.tone === "success" && "bg-emerald-100 text-emerald-900",
-                      notice.tone === "error" && "bg-rose-100 text-rose-900",
-                      notice.tone === "info" && "bg-slate-100 text-slate-900",
+                      "inline-flex rounded-full px-3 py-1 text-xs font-medium ring-1",
+                      notice.tone === "success" &&
+                        "bg-emerald-500/14 text-emerald-100 ring-emerald-400/20",
+                      notice.tone === "error" &&
+                        "bg-rose-500/14 text-rose-100 ring-rose-400/20",
+                      notice.tone === "info" &&
+                        "bg-primary/12 text-primary ring-primary/20",
                     )}
                   >
                     {notice.message}
@@ -749,7 +784,7 @@ export function DashboardShell({
         </main>
 
         <aside className="xl:sticky xl:top-4 xl:self-start">
-          <Card className="border border-white/40 bg-white/80 backdrop-blur">
+          <Card className="brand-panel">
             <CardHeader>
               <CardTitle>Approvals and action log</CardTitle>
               <CardDescription>
@@ -933,7 +968,7 @@ function SetupView({
 
   return (
     <div className="grid gap-4 2xl:grid-cols-[1.1fr_0.9fr]">
-      <Card className="border border-white/40 bg-white/80 backdrop-blur">
+      <Card className="brand-panel">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <ShieldCheck className="size-4" />
@@ -1059,7 +1094,7 @@ function SetupView({
       </Card>
 
       <div className="space-y-4">
-        <Card className="border border-white/40 bg-white/80 backdrop-blur">
+        <Card className="brand-panel">
           <CardHeader>
             <CardTitle>Recurring contacts</CardTitle>
             <CardDescription>
@@ -1121,7 +1156,7 @@ function SetupView({
           </CardContent>
         </Card>
 
-        <Card className="border border-white/40 bg-white/80 backdrop-blur">
+        <Card className="brand-panel">
           <CardHeader>
             <CardTitle>School breaks</CardTitle>
             <CardDescription>
@@ -1203,7 +1238,7 @@ function InboxView({
 }) {
   return (
     <div className="grid gap-4 2xl:grid-cols-[1.1fr_0.9fr]">
-      <Card className="border border-white/40 bg-white/80 backdrop-blur">
+      <Card className="brand-panel">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <ChatsCircle className="size-4" />
@@ -1296,7 +1331,7 @@ function InboxView({
       </Card>
 
       <div className="space-y-4">
-        <Card className="border border-white/40 bg-white/80 backdrop-blur">
+        <Card className="brand-panel">
           <CardHeader>
             <CardTitle>Mock message composer</CardTitle>
             <CardDescription>
@@ -1360,7 +1395,7 @@ function InboxView({
           </CardFooter>
         </Card>
 
-        <Card className="border border-white/40 bg-white/80 backdrop-blur">
+        <Card className="brand-panel">
           <CardHeader>
             <CardTitle>Extracted structured content</CardTitle>
             <CardDescription>
@@ -1408,7 +1443,7 @@ function NewsletterView({
 }) {
   return (
     <div className="grid gap-4 2xl:grid-cols-[1.15fr_0.85fr]">
-      <Card className="border border-white/40 bg-white/80 backdrop-blur">
+      <Card className="brand-panel">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <NotePencil className="size-4" />
@@ -1475,7 +1510,7 @@ function NewsletterView({
       </Card>
 
       <div className="space-y-4">
-        <Card className="border border-white/40 bg-white/80 backdrop-blur">
+        <Card className="brand-panel">
           <CardHeader>
             <CardTitle>Audience variants</CardTitle>
             <CardDescription>
@@ -1509,7 +1544,7 @@ function NewsletterView({
           </CardContent>
         </Card>
 
-        <Card className="border border-white/40 bg-white/80 backdrop-blur">
+        <Card className="brand-panel">
           <CardHeader>
             <CardTitle>Flyer recommendations</CardTitle>
             <CardDescription>
@@ -1582,7 +1617,7 @@ function ActionsView({
         return (
           <Card
             key={approval.id}
-            className="border border-white/40 bg-white/80 backdrop-blur"
+            className="brand-panel"
           >
             <CardHeader>
               <CardTitle className="flex items-center justify-between gap-3">
@@ -1679,7 +1714,7 @@ function ActionsView({
 
 function AuditView({ state }: { state: DemoState }) {
   return (
-    <Card className="border border-white/40 bg-white/80 backdrop-blur">
+    <Card className="brand-panel">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <CalendarDots className="size-4" />
