@@ -28,17 +28,40 @@ export function shouldSkipParentSend(
   };
 }
 
+export function normalizePlannerState(planner: PlannerState): PlannerState {
+  const activeIndex = planner.timeline.findIndex(
+    (entry) => entry.stage === planner.currentStage,
+  );
+  const currentIndex = activeIndex === -1 ? 0 : activeIndex;
+
+  return {
+    ...planner,
+    currentStage:
+      planner.timeline[currentIndex]?.stage ?? planner.currentStage,
+    timeline: planner.timeline.map((entry, index) => ({
+      ...entry,
+      status:
+        index < currentIndex
+          ? "done"
+          : index === currentIndex
+            ? "active"
+            : "upcoming",
+    })),
+  };
+}
+
 export function refreshPlannerState(
   planner: PlannerState,
   breaks: SchoolBreak[],
 ): PlannerState {
-  const sundayTarget = planner.timeline.find(
+  const normalizedPlanner = normalizePlannerState(planner);
+  const sundayTarget = normalizedPlanner.timeline.find(
     (entry) => entry.stage === "sunday_parent_schedule",
   );
   const skipDecision = shouldSkipParentSend(sundayTarget?.targetTime, breaks);
 
   return {
-    ...planner,
+    ...normalizedPlanner,
     skipNextParentSend: skipDecision.skip,
     skipReason: skipDecision.reason,
   };

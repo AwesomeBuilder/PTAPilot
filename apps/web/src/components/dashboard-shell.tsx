@@ -177,18 +177,6 @@ function createApprovalDrafts(approvals: ApprovalAction[]) {
   ) as ApprovalDraftMap;
 }
 
-function statusBadgeVariant(status: string) {
-  if (status === "connected" || status === "approved" || status === "done") {
-    return "default" as const;
-  }
-
-  if (status === "needs_setup" || status === "rejected") {
-    return "destructive" as const;
-  }
-
-  return "secondary" as const;
-}
-
 const DISPLAY_VALUE_LABELS: Record<string, string> = {
   ai: "AI",
   auth0: "Auth0",
@@ -320,6 +308,101 @@ function createSetupPayload(setupDraft: SetupDraft): SetupUpdateInput {
     integrations: setupDraft.integrations,
     planner: setupDraft.planner,
   };
+}
+
+function getStatusTone(status: string) {
+  const normalized = status.toLowerCase();
+
+  if (
+    ["approved", "connected", "done", "published"].includes(normalized)
+  ) {
+    return {
+      container:
+        "border-emerald-400/20 bg-emerald-400/10 text-emerald-100",
+      dot: "bg-emerald-300",
+    };
+  }
+
+  if (["active", "current_focus"].includes(normalized)) {
+    return {
+      container: "border-primary/25 bg-primary/10 text-primary",
+      dot: "bg-primary",
+    };
+  }
+
+  if (["needs_setup", "rejected"].includes(normalized)) {
+    return {
+      container: "border-rose-400/20 bg-rose-400/10 text-rose-100",
+      dot: "bg-rose-300",
+    };
+  }
+
+  return {
+    container: "border-border/80 bg-background/65 text-muted-foreground",
+    dot: "bg-muted-foreground/70",
+  };
+}
+
+function StatusIndicator({
+  status,
+  label,
+  className,
+}: {
+  status: string;
+  label?: string;
+  className?: string;
+}) {
+  const tone = getStatusTone(status);
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-[0.64rem] font-semibold tracking-[0.18em] whitespace-nowrap uppercase",
+        tone.container,
+        className,
+      )}
+    >
+      <span className={cn("size-1.5 rounded-full", tone.dot)} />
+      <span>{label ?? formatDisplayLabel(status)}</span>
+    </span>
+  );
+}
+
+function FlyerPreviewMedia({
+  title,
+  imageUrl,
+}: {
+  title: string;
+  imageUrl?: string;
+}) {
+  const [imageFailed, setImageFailed] = useState(false);
+
+  if (!imageUrl || imageFailed) {
+    return (
+      <div className="flex h-44 w-full items-center justify-center bg-[linear-gradient(135deg,rgba(45,200,255,0.18),rgba(11,21,36,0.86)_40%,rgba(6,14,24,0.98)_100%)] px-6">
+        <div className="w-full max-w-sm rounded-[1.5rem] border border-white/10 bg-black/20 p-5 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+          <p className="text-[0.68rem] font-semibold tracking-[0.24em] text-primary/80 uppercase">
+            Preview unavailable
+          </p>
+          <p className="mt-3 text-sm font-medium text-foreground">{title}</p>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+            The recommendation is still available even when the remote preview
+            image fails to load.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={imageUrl}
+      alt={title}
+      className="h-44 w-full object-cover"
+      referrerPolicy="no-referrer"
+      onError={() => setImageFailed(true)}
+    />
+  );
 }
 
 function withUserQuery(path: string, userId?: string | null) {
@@ -783,7 +866,7 @@ export function DashboardShell({
   return (
     <div className="relative min-h-screen overflow-hidden px-4 py-4 sm:px-6 lg:px-8">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-80 bg-[radial-gradient(circle_at_16%_12%,rgba(45,200,255,0.18),transparent_32%),radial-gradient(circle_at_84%_8%,rgba(73,112,255,0.2),transparent_28%)]" />
-      <div className="relative mx-auto grid max-w-[1680px] gap-5 xl:grid-cols-[260px_minmax(0,1fr)] 2xl:grid-cols-[260px_minmax(0,1fr)_320px]">
+      <div className="relative mx-auto grid max-w-[1680px] gap-5 xl:grid-cols-[292px_minmax(0,1fr)] 2xl:grid-cols-[292px_minmax(0,1fr)_320px]">
         <aside className="xl:sticky xl:top-4 xl:self-start">
           <Card className="brand-panel">
             <CardHeader>
@@ -803,19 +886,16 @@ export function DashboardShell({
                 publish, or schedule actions.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-5">
+            <CardContent className="space-y-4">
               <div className="rounded-2xl border border-border/80 bg-background/85 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium">Current workspace</p>
-                    <p className="text-sm text-muted-foreground">
-                      {snapshot.workspaceTitle}
-                    </p>
-                  </div>
-                  <Badge variant="secondary">
-                    {formatDisplayLabel(snapshot.planner.currentStage)}
-                  </Badge>
-                </div>
+                <p className="text-sm font-medium">Current workspace</p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  {snapshot.workspaceTitle}
+                </p>
+                <StatusIndicator
+                  status={snapshot.planner.currentStage}
+                  className="mt-3"
+                />
                 <Separator className="my-4" />
                 <div className="space-y-3">
                   {snapshot.planner.timeline.map((stage) => (
@@ -823,53 +903,25 @@ export function DashboardShell({
                       key={stage.stage}
                       type="button"
                       onClick={() => openWorkflowStage(stage.stage)}
-                      className="flex w-full items-start justify-between rounded-2xl border border-transparent px-3 py-2 text-left transition hover:border-border hover:bg-muted/60"
+                      className="w-full rounded-[1.35rem] border border-transparent bg-background/35 px-3.5 py-3 text-left transition hover:border-border hover:bg-muted/40"
                     >
-                      <div>
-                        <p className="text-sm font-medium">{stage.label}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatDateTime(stage.targetTime)}
-                        </p>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 pr-2">
+                          <p className="text-sm leading-5 font-medium">
+                            {stage.label}
+                          </p>
+                          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                            {formatDateTime(stage.targetTime)}
+                          </p>
+                        </div>
+                        <StatusIndicator
+                          status={stage.status}
+                          className="mt-0.5 shrink-0"
+                        />
                       </div>
-                      <Badge variant={statusBadgeVariant(stage.status)}>
-                        {formatDisplayLabel(stage.status)}
-                      </Badge>
                     </button>
                   ))}
                 </div>
-              </div>
-
-              <div className="space-y-2">
-                <p className="px-1 text-xs font-semibold tracking-[0.22em] text-muted-foreground uppercase">
-                  Workspace views
-                </p>
-                {viewDefinitions.map(({ key, label, icon: Icon }) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => selectView(key)}
-                    className={cn(
-                      "flex w-full items-center justify-between rounded-2xl border px-3 py-3 text-left transition",
-                      activeView === key
-                        ? "border-primary/40 bg-primary/10"
-                        : "border-transparent bg-background/70 hover:border-border hover:bg-background",
-                    )}
-                  >
-                    <span className="flex items-center gap-3">
-                      <Icon className="size-4" />
-                      <span className="text-sm font-medium">{label}</span>
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {key === "actions"
-                        ? snapshot.approvals.filter(
-                            (approval) => approval.status === "pending",
-                          ).length
-                        : key === "audit"
-                          ? snapshot.auditLog.length
-                          : ""}
-                    </span>
-                  </button>
-                ))}
               </div>
             </CardContent>
           </Card>
@@ -947,86 +999,127 @@ export function DashboardShell({
             </CardContent>
           </Card>
 
-          {activeView === "setup" ? (
-            <SetupView
-              setupDraft={setupDraft}
-              authEnabled={authEnabled}
-              gmailConnectUrl={gmailConnectUrl}
-              authStatus={authStatus}
-              authStatusError={authStatusError}
-              isRefreshingAuthStatus={isRefreshingAuthStatus}
-              user={user}
-              onRefreshAuthStatus={() => void refreshAuthStatus()}
-              onAuth0EmailChange={(value) =>
-                setSetupDraft((current) => ({
-                  ...current,
-                  auth0AccountEmail: value,
-                }))
-              }
-              onIntegrationModeChange={updateIntegrationMode}
-              onAddContact={addContactToDraft}
-              onAddBreak={addBreakToDraft}
-              onUpdateContact={updateContactField}
-              onRemoveContact={removeContact}
-              onUpdateBreak={updateBreakField}
-              onRemoveBreak={removeBreak}
-              onSetCurrentWorkflowStage={setCurrentWorkflowStage}
-              onUpdateWorkflowTargetTime={updateWorkflowTargetTime}
-              onOpenWorkflowStage={openWorkflowStage}
-              newContact={newContact}
-              newBreak={newBreak}
-              setNewContact={setNewContact}
-              setNewBreak={setNewBreak}
-              onSave={() => void saveSetupDraft()}
-              hasUnsavedChanges={hasUnsavedSetupChanges}
-              pendingApprovalsCount={pendingApprovalsCount}
-              isMutating={isMutating}
-            />
-          ) : null}
+          <Tabs
+            value={activeView}
+            onValueChange={(value) => selectView(value as ViewKey)}
+            className="space-y-4"
+          >
+            <Card className="brand-panel overflow-hidden">
+              <CardContent className="px-3 py-3">
+                <TabsList className="h-auto w-full justify-start items-stretch gap-2 overflow-x-auto rounded-[1.45rem] bg-background/75 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  {viewDefinitions.map(({ key, label, icon: Icon }) => {
+                    const count =
+                      key === "actions"
+                        ? pendingApprovalsCount
+                        : key === "audit"
+                          ? snapshot.auditLog.length
+                          : null;
 
-          {activeView === "inbox" ? (
-            <InboxView
-              state={snapshot}
-              mockMessageDraft={mockMessageDraft}
-              setMockMessageDraft={setMockMessageDraft}
-              onIngest={() => void ingestUpdates()}
-              onSubmitMockMessage={() => void submitMockMessage()}
-              isMutating={isMutating}
-            />
-          ) : null}
+                    return (
+                      <TabsTrigger
+                        key={key}
+                        value={key}
+                        className="h-auto min-w-[150px] flex-none items-center justify-between rounded-[1.1rem] px-4 py-3 text-left data-active:bg-primary/10 data-active:text-foreground"
+                      >
+                        <span className="flex items-center gap-3">
+                          <Icon className="size-4" />
+                          <span className="text-sm font-medium">{label}</span>
+                        </span>
+                        {count ? (
+                          <span className="text-xs font-semibold text-muted-foreground">
+                            {count}
+                          </span>
+                        ) : null}
+                      </TabsTrigger>
+                    );
+                  })}
+                </TabsList>
+              </CardContent>
+            </Card>
 
-          {activeView === "newsletter" ? (
-            <NewsletterView
-              state={snapshot}
-              onDuplicate={() => void duplicateNewsletter()}
-              isMutating={isMutating}
-            />
-          ) : null}
+            <TabsContent value="setup">
+              <SetupView
+                setupDraft={setupDraft}
+                authEnabled={authEnabled}
+                gmailConnectUrl={gmailConnectUrl}
+                authStatus={authStatus}
+                authStatusError={authStatusError}
+                isRefreshingAuthStatus={isRefreshingAuthStatus}
+                user={user}
+                onRefreshAuthStatus={() => void refreshAuthStatus()}
+                onAuth0EmailChange={(value) =>
+                  setSetupDraft((current) => ({
+                    ...current,
+                    auth0AccountEmail: value,
+                  }))
+                }
+                onIntegrationModeChange={updateIntegrationMode}
+                onAddContact={addContactToDraft}
+                onAddBreak={addBreakToDraft}
+                onUpdateContact={updateContactField}
+                onRemoveContact={removeContact}
+                onUpdateBreak={updateBreakField}
+                onRemoveBreak={removeBreak}
+                onSetCurrentWorkflowStage={setCurrentWorkflowStage}
+                onUpdateWorkflowTargetTime={updateWorkflowTargetTime}
+                onOpenWorkflowStage={openWorkflowStage}
+                newContact={newContact}
+                newBreak={newBreak}
+                setNewContact={setNewContact}
+                setNewBreak={setNewBreak}
+                onSave={() => void saveSetupDraft()}
+                hasUnsavedChanges={hasUnsavedSetupChanges}
+                pendingApprovalsCount={pendingApprovalsCount}
+                isMutating={isMutating}
+              />
+            </TabsContent>
 
-          {activeView === "actions" ? (
-            <ActionsView
-              state={snapshot}
-              approvalDrafts={approvalDrafts}
-              onDraftChange={(actionId, field, value) =>
-                setApprovalDrafts((current) => ({
-                  ...current,
-                  [actionId]: {
-                    ...(current[actionId] ?? {
-                      subject: "",
-                      body: "",
-                    }),
-                    [field]: value,
-                  },
-                }))
-              }
-              onSave={saveApproval}
-              onApprove={approveAction}
-              onReject={rejectAction}
-              isMutating={isMutating}
-            />
-          ) : null}
+            <TabsContent value="inbox">
+              <InboxView
+                state={snapshot}
+                mockMessageDraft={mockMessageDraft}
+                setMockMessageDraft={setMockMessageDraft}
+                onIngest={() => void ingestUpdates()}
+                onSubmitMockMessage={() => void submitMockMessage()}
+                isMutating={isMutating}
+              />
+            </TabsContent>
 
-          {activeView === "audit" ? <AuditView state={snapshot} /> : null}
+            <TabsContent value="newsletter">
+              <NewsletterView
+                state={snapshot}
+                onDuplicate={() => void duplicateNewsletter()}
+                isMutating={isMutating}
+              />
+            </TabsContent>
+
+            <TabsContent value="actions">
+              <ActionsView
+                state={snapshot}
+                approvalDrafts={approvalDrafts}
+                onDraftChange={(actionId, field, value) =>
+                  setApprovalDrafts((current) => ({
+                    ...current,
+                    [actionId]: {
+                      ...(current[actionId] ?? {
+                        subject: "",
+                        body: "",
+                      }),
+                      [field]: value,
+                    },
+                  }))
+                }
+                onSave={saveApproval}
+                onApprove={approveAction}
+                onReject={rejectAction}
+                isMutating={isMutating}
+              />
+            </TabsContent>
+
+            <TabsContent value="audit">
+              <AuditView state={snapshot} />
+            </TabsContent>
+          </Tabs>
         </main>
 
         <aside className="xl:col-start-2 2xl:col-start-auto 2xl:sticky 2xl:top-4 2xl:self-start">
@@ -1053,9 +1146,7 @@ export function DashboardShell({
                           {formatDisplayLabel(approval.audience)}
                         </p>
                       </div>
-                      <Badge variant={statusBadgeVariant(approval.status)}>
-                        {formatDisplayLabel(approval.status)}
-                      </Badge>
+                      <StatusIndicator status={approval.status} />
                     </div>
                     <p className="mt-2 text-xs text-muted-foreground">
                       {approval.rationale}
@@ -1302,13 +1393,14 @@ function SetupView({
       <Card className="brand-panel overflow-hidden">
         <CardContent className="grid gap-5 pt-6 xl:grid-cols-[minmax(0,1.2fr)_320px]">
           <div className="rounded-[1.9rem] border border-primary/20 bg-[linear-gradient(135deg,rgba(45,200,255,0.18),rgba(11,21,36,0.92)_45%,rgba(8,15,28,0.98)_100%)] p-6">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={hasUnsavedChanges ? "secondary" : "outline"}>
-                {hasUnsavedChanges ? "Unsaved workspace edits" : "Workspace saved"}
-              </Badge>
-              <Badge variant="outline">
+            <div className="flex flex-wrap items-center gap-3">
+              <StatusIndicator
+                status={hasUnsavedChanges ? "active" : "done"}
+                label={hasUnsavedChanges ? "Unsaved edits" : "Workspace saved"}
+              />
+              <span className="text-xs font-semibold tracking-[0.18em] text-muted-foreground uppercase">
                 Current stage {formatDisplayLabel(setupDraft.planner.currentStage)}
-              </Badge>
+              </span>
             </div>
             <p className="mt-5 text-xs font-semibold tracking-[0.24em] text-primary/[0.85] uppercase">
               Next action
@@ -1423,13 +1515,14 @@ function SetupView({
                           Routes to {formatDisplayLabel(getViewForStage(entry.stage))}.
                         </p>
                       </div>
-                      <Badge
-                        variant={isCurrentStage ? "default" : statusBadgeVariant(entry.status)}
-                      >
-                        {isCurrentStage
-                          ? "Current focus"
-                          : formatDisplayLabel(entry.status)}
-                      </Badge>
+                      <StatusIndicator
+                        status={isCurrentStage ? "current_focus" : entry.status}
+                        label={
+                          isCurrentStage
+                            ? "Current focus"
+                            : formatDisplayLabel(entry.status)
+                        }
+                      />
                     </div>
                     <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
                       <div className="space-y-2">
@@ -1570,12 +1663,10 @@ function SetupView({
                           {integration.description}
                         </p>
                       </div>
-                      <Badge
-                        variant={statusBadgeVariant(integration.status)}
+                      <StatusIndicator
+                        status={integration.status}
                         className="self-start"
-                      >
-                        {formatDisplayLabel(integration.status)}
-                      </Badge>
+                      />
                     </div>
                     <div className="mt-4 flex flex-wrap gap-2">
                       {(["mock", "live", "manual"] as IntegrationMode[]).map((mode) => (
@@ -1944,6 +2035,7 @@ function InboxView({
                       src={message.imageUrl}
                       alt={message.body}
                       className="mt-3 h-36 w-full rounded-2xl object-cover"
+                      referrerPolicy="no-referrer"
                     />
                   ) : null}
                 </div>
@@ -2034,9 +2126,7 @@ function InboxView({
               >
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-sm font-medium">{item.title}</p>
-                  <Badge variant={statusBadgeVariant(item.priority)}>
-                    {formatDisplayLabel(item.priority)}
-                  </Badge>
+                  <StatusIndicator status={item.priority} />
                 </div>
                 <p className="mt-2 text-sm text-muted-foreground">{item.summary}</p>
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -2087,9 +2177,7 @@ function NewsletterView({
               Duplicate last newsletter
             </Button>
             <Badge variant="outline">Audience: board</Badge>
-            <Badge variant="secondary">
-              {formatDisplayLabel(state.newsletters.board.status)}
-            </Badge>
+            <StatusIndicator status={state.newsletters.board.status} />
           </div>
           {state.newsletters.board.sections.map((section) => (
             <div
@@ -2118,9 +2206,7 @@ function NewsletterView({
                           {item.body}
                         </p>
                       </div>
-                      <Badge variant={statusBadgeVariant(item.priority)}>
-                        {formatDisplayLabel(item.priority)}
-                      </Badge>
+                      <StatusIndicator status={item.priority} />
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       {item.sourceBadges.map((badge) => (
@@ -2163,9 +2249,7 @@ function NewsletterView({
                       {state.newsletters[audience].title}
                     </p>
                   </div>
-                  <Badge variant={statusBadgeVariant(state.newsletters[audience].status)}>
-                    {formatDisplayLabel(state.newsletters[audience].status)}
-                  </Badge>
+                  <StatusIndicator status={state.newsletters[audience].status} />
                 </div>
                 <p className="mt-2 text-sm text-muted-foreground">
                   {state.newsletters[audience].summary}
@@ -2188,19 +2272,15 @@ function NewsletterView({
                 key={recommendation.id}
                 className="overflow-hidden rounded-2xl border border-border/80 bg-background/75"
               >
-                {recommendation.imageUrl ? (
-                  <img
-                    src={recommendation.imageUrl}
-                    alt={recommendation.title}
-                    className="h-40 w-full object-cover"
-                  />
-                ) : null}
+                <FlyerPreviewMedia
+                  key={`${recommendation.id}-${recommendation.imageUrl ?? "fallback"}`}
+                  title={recommendation.title}
+                  imageUrl={recommendation.imageUrl}
+                />
                 <div className="p-4">
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-medium">{recommendation.title}</p>
-                    <Badge variant="secondary">
-                      {formatDisplayLabel(recommendation.status)}
-                    </Badge>
+                    <StatusIndicator status={recommendation.status} />
                   </div>
                   <p className="mt-2 text-sm text-muted-foreground">
                     {recommendation.reason}
@@ -2255,9 +2335,7 @@ function ActionsView({
             <CardHeader>
               <CardTitle className="flex items-center justify-between gap-3">
                 <span>{approval.title}</span>
-                <Badge variant={statusBadgeVariant(approval.status)}>
-                  {formatDisplayLabel(approval.status)}
-                </Badge>
+                <StatusIndicator status={approval.status} />
               </CardTitle>
               <CardDescription>
                 {formatDisplayLabel(approval.channel)} •{" "}

@@ -177,8 +177,8 @@ export class DemoService {
   async updateSetup(input: SetupUpdateInput): Promise<DemoState> {
     const state = await this.store.read();
 
-    if (input.auth0AccountEmail) {
-      state.setup.auth0AccountEmail = input.auth0AccountEmail;
+    if (input.auth0AccountEmail !== undefined) {
+      state.setup.auth0AccountEmail = input.auth0AccountEmail || undefined;
     }
 
     if (input.contacts) {
@@ -193,6 +193,14 @@ export class DemoService {
       state.setup.integrations = {
         ...state.setup.integrations,
         ...input.integrations,
+      };
+    }
+
+    if (input.planner) {
+      state.planner = {
+        ...state.planner,
+        currentStage: input.planner.currentStage,
+        timeline: input.planner.timeline,
       };
     }
 

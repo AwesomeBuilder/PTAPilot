@@ -14,8 +14,21 @@ export const schoolBreakSchema = z.object({
   endsOn: z.string(),
 });
 
+export const plannerTimelineEntrySchema = z.object({
+  stage: z.enum([
+    "monday_reminder",
+    "collect_updates",
+    "wednesday_draft",
+    "thursday_teacher_release",
+    "sunday_parent_schedule",
+  ]),
+  label: z.string(),
+  targetTime: z.string(),
+  status: z.enum(["done", "active", "upcoming"]),
+});
+
 export const setupUpdateSchema = z.object({
-  auth0AccountEmail: z.string().email().optional(),
+  auth0AccountEmail: z.string().email().or(z.literal("")).optional(),
   contacts: z.array(contactSchema).optional(),
   schoolBreaks: z.array(schoolBreakSchema).optional(),
   integrations: z
@@ -25,6 +38,18 @@ export const setupUpdateSchema = z.object({
       membershipToolkit: z.any().optional(),
       mockMessages: z.any().optional(),
       flyer: z.any().optional(),
+    })
+    .optional(),
+  planner: z
+    .object({
+      currentStage: z.enum([
+        "monday_reminder",
+        "collect_updates",
+        "wednesday_draft",
+        "thursday_teacher_release",
+        "sunday_parent_schedule",
+      ]),
+      timeline: z.array(plannerTimelineEntrySchema),
     })
     .optional(),
 });

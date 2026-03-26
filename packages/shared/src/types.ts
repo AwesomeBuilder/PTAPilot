@@ -42,6 +42,13 @@ export interface SchoolBreak {
   endsOn: string;
 }
 
+export interface PlannerTimelineEntry {
+  stage: WorkflowStage;
+  label: string;
+  targetTime: string;
+  status: "done" | "active" | "upcoming";
+}
+
 export interface IntegrationConfig {
   mode: IntegrationMode;
   status: IntegrationStatus;
@@ -176,14 +183,14 @@ export interface AuditEntry {
 
 export interface PlannerState {
   currentStage: WorkflowStage;
-  timeline: Array<{
-    stage: WorkflowStage;
-    label: string;
-    targetTime: string;
-    status: "done" | "active" | "upcoming";
-  }>;
+  timeline: PlannerTimelineEntry[];
   skipNextParentSend: boolean;
   skipReason?: string;
+}
+
+export interface PlannerUpdateInput {
+  currentStage: WorkflowStage;
+  timeline: PlannerTimelineEntry[];
 }
 
 export interface InboxState {
@@ -214,6 +221,7 @@ export interface SetupUpdateInput {
   contacts?: Contact[];
   schoolBreaks?: SchoolBreak[];
   integrations?: Partial<SetupState["integrations"]>;
+  planner?: PlannerUpdateInput;
 }
 
 export interface AddMockMessageInput {
