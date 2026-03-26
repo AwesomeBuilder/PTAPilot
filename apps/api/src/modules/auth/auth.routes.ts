@@ -13,6 +13,7 @@ export function createAuthRouter(): ExpressRouter {
       const userId =
         typeof request.query.userId === "string" ? request.query.userId : undefined;
 
+      response.set("Cache-Control", "no-store");
       response.json({
         tokenVault: getTokenVaultStatus(),
         managementApi: getManagementApiStatus(),

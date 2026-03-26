@@ -56,8 +56,29 @@ export type GmailAccessTokenBundle = {
   note: string;
 };
 
+const missingIdentityAccessTokenBaseNote =
+  "Auth0 found the Gmail identity, but did not expose a current Google access token on the user profile.";
+
 function normalizeAuth0Domain(domain: string) {
   return domain.startsWith("http") ? domain : `https://${domain}`;
+}
+
+function formatMissingIdentityAccessTokenNote(
+  hasConnectedGmailTokenset = false,
+) {
+  if (hasConnectedGmailTokenset) {
+    return (
+      "Auth0 found the Gmail connection for this user, but the current demo fallback could not " +
+      "read a fresh Google access token from the Auth0 user profile. Reconnect Gmail once to " +
+      "refresh it; if this keeps happening, this tenant is not exposing identity-provider " +
+      "tokens and PTA Pilot needs a real Token Vault exchange flow."
+    );
+  }
+
+  return (
+    `${missingIdentityAccessTokenBaseNote} ` +
+    "Reconnect Gmail through Auth0 to mint a fresh Google access token for the demo."
+  );
 }
 
 function getConfiguredGmailScopes(runtimeEnv: AppEnv = env) {
@@ -271,9 +292,7 @@ export async function getGmailIdentityAccessToken(
   const gmailIdentity = findGmailIdentity(profile.identities, runtimeEnv);
 
   if (!gmailIdentity?.access_token) {
-    throw new Error(
-      "Auth0 found the Gmail identity, but did not expose a current Google access token on the user profile. Reconnect Gmail through Auth0 so PTA Pilot can use the documented identity-provider fallback path.",
-    );
+    throw new Error(formatMissingIdentityAccessTokenNote());
   }
 
   return {
@@ -374,6 +393,15 @@ export async function getGmailTokenVaultStatus(
       note: `${tokensetNote} ${probe.note}`,
     };
   } catch (fallbackError) {
+    const fallbackNote =
+      fallbackError instanceof Error &&
+      fallbackError.message.startsWith(missingIdentityAccessTokenBaseNote) &&
+      gmailTokensets.length > 0
+        ? formatMissingIdentityAccessTokenNote(true)
+        : fallbackError instanceof Error
+          ? fallbackError.message
+          : tokensetNote;
+
     return {
       connection: runtimeEnv.AUTH0_GMAIL_CONNECTION,
       requiredScopes,
@@ -385,10 +413,7 @@ export async function getGmailTokenVaultStatus(
       managementApiConfigured: true,
       tokenVaultConfigured: tokenVaultStatus.configured,
       actionPath: "unavailable" as const,
-      note:
-        fallbackError instanceof Error
-          ? `${tokensetNote} ${fallbackError.message}`
-          : tokensetNote,
+      note: `${tokensetNote} ${fallbackNote}`,
     };
   }
 }
