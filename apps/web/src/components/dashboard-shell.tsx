@@ -5,7 +5,6 @@ import {
   startTransition,
   useCallback,
   useEffect,
-  useEffectEvent,
   useRef,
   useState,
   type ChangeEvent,
@@ -15,15 +14,18 @@ import {
 } from "react";
 import { format } from "date-fns";
 import {
+  ArrowRight,
   ArrowClockwise,
   CalendarDots,
   ChatsCircle,
+  CheckCircle,
   ClockCountdown,
   EnvelopeSimple,
   GearSix,
   ListChecks,
   NotePencil,
   ShieldCheck,
+  Trash,
 } from "@phosphor-icons/react";
 import type {
   AddMockMessageInput,
@@ -36,6 +38,8 @@ import type {
   IntegrationMode,
   IntegrationStatus,
   SchoolBreak,
+  SetupUpdateInput,
+  WorkflowStage,
 } from "@pta-pilot/shared";
 import { seedDemoState } from "@pta-pilot/shared";
 import { Badge } from "@/components/ui/badge";
@@ -114,6 +118,7 @@ type SetupDraft = {
   contacts: Contact[];
   schoolBreaks: SchoolBreak[];
   integrations: DemoState["setup"]["integrations"];
+  planner: NonNullable<SetupUpdateInput["planner"]>;
 };
 
 const viewDefinitions: Array<{
@@ -153,6 +158,10 @@ function createSetupDraft(state: DemoState): SetupDraft {
     contacts: structuredClone(state.setup.contacts),
     schoolBreaks: structuredClone(state.setup.schoolBreaks),
     integrations: structuredClone(state.setup.integrations),
+    planner: {
+      currentStage: state.planner.currentStage,
+      timeline: structuredClone(state.planner.timeline),
+    },
   };
 }
 
@@ -180,12 +189,137 @@ function statusBadgeVariant(status: string) {
   return "secondary" as const;
 }
 
+const DISPLAY_VALUE_LABELS: Record<string, string> = {
+  ai: "AI",
+  auth0: "Auth0",
+  gmail: "Gmail",
+  imessage: "iMessage",
+  identityprovider: "Identity Provider",
+  membershiptoolkit: "Membership Toolkit",
+  mockmessages: "Mock Messages",
+  pta: "PTA",
+  tokenvault: "Token Vault",
+  whatsapp: "WhatsApp",
+};
+
+const DISPLAY_TOKEN_LABELS: Record<string, string> = {
+  ai: "AI",
+  api: "API",
+  auth0: "Auth0",
+  gmail: "Gmail",
+  pta: "PTA",
+};
+
+function formatDisplayLabel(value: string) {
+  const normalized = value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim();
+
+  const compact = normalized.replace(/\s+/g, "").toLowerCase();
+
+  if (compact in DISPLAY_VALUE_LABELS) {
+    return DISPLAY_VALUE_LABELS[compact];
+  }
+
+  return normalized
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => {
+      const lowerToken = token.toLowerCase();
+      return (
+        DISPLAY_TOKEN_LABELS[lowerToken] ??
+        `${token.charAt(0).toUpperCase()}${token.slice(1).toLowerCase()}`
+      );
+    })
+    .join(" ");
+}
+
 function formatDateTime(value: string | undefined) {
   if (!value) {
     return "Not scheduled";
   }
 
   return format(new Date(value), "EEE, MMM d • h:mm a");
+}
+
+function formatDateTimeInput(value: string | undefined) {
+  if (!value) {
+    return "";
+  }
+
+  return format(new Date(value), "yyyy-MM-dd'T'HH:mm");
+}
+
+function toIsoDateTime(value: string) {
+  return value ? new Date(value).toISOString() : "";
+}
+
+function getViewForStage(stage: WorkflowStage): ViewKey {
+  if (stage === "collect_updates") {
+    return "inbox";
+  }
+
+  if (stage === "wednesday_draft") {
+    return "newsletter";
+  }
+
+  return "actions";
+}
+
+function getStageActionCopy(stage: WorkflowStage) {
+  if (stage === "collect_updates") {
+    return {
+      title: "Collect this week’s updates",
+      description:
+        "Pull in family replies and staff messages before drafting the next newsletter.",
+      buttonLabel: "Open inbox",
+    };
+  }
+
+  if (stage === "wednesday_draft") {
+    return {
+      title: "Shape the board review draft",
+      description:
+        "Refine the newsletter structure and confirm the Wednesday board version is ready.",
+      buttonLabel: "Open newsletter editor",
+    };
+  }
+
+  if (stage === "thursday_teacher_release") {
+    return {
+      title: "Review the teacher release",
+      description:
+        "Check the approval copy and timing before the teacher-facing version goes out.",
+      buttonLabel: "Review actions",
+    };
+  }
+
+  if (stage === "sunday_parent_schedule") {
+    return {
+      title: "Confirm the parent send plan",
+      description:
+        "Verify the parent newsletter schedule and break logic before Sunday automation runs.",
+      buttonLabel: "Review actions",
+    };
+  }
+
+  return {
+    title: "Confirm the Monday reminder",
+    description:
+      "Review the reminder content and make sure the workflow starts the week in the right stage.",
+    buttonLabel: "Review actions",
+  };
+}
+
+function createSetupPayload(setupDraft: SetupDraft): SetupUpdateInput {
+  return {
+    auth0AccountEmail: setupDraft.auth0AccountEmail.trim(),
+    contacts: setupDraft.contacts,
+    schoolBreaks: setupDraft.schoolBreaks,
+    integrations: setupDraft.integrations,
+    planner: setupDraft.planner,
+  };
 }
 
 function withUserQuery(path: string, userId?: string | null) {
@@ -222,7 +356,7 @@ function getGmailIntegrationDisplayStatus(
     return user?.email ? "pending" : integration.status;
   }
 
-  if (authStatus.gmail.liveReady) {
+  if (authStatus.gmail.liveReady || authStatus.gmail.connected) {
     return "connected";
   }
 
@@ -259,6 +393,7 @@ export function DashboardShell({
   );
   const [authStatus, setAuthStatus] = useState<AuthStatusResponse | null>(null);
   const [authStatusError, setAuthStatusError] = useState<string | null>(null);
+  const [isRefreshingAuthStatus, setIsRefreshingAuthStatus] = useState(false);
   const [notice, setNotice] = useState<Notice>({
     tone: "info",
     message: "Loading the backend snapshot. Seeded data will be used if the API is offline.",
@@ -312,14 +447,16 @@ export function DashboardShell({
     setApprovalDrafts(createApprovalDrafts(snapshot.approvals));
   }, [snapshot]);
 
-  const refreshAuthStatus = useEffectEvent(async () => {
+  const refreshAuthStatus = useCallback(async () => {
     if (!authEnabled) {
+      setIsRefreshingAuthStatus(false);
       setAuthStatus(null);
       setAuthStatusError(null);
       return;
     }
 
     try {
+      setIsRefreshingAuthStatus(true);
       const nextStatus = await fetchJson<AuthStatusResponse>(
         withUserQuery("/api/auth/status", user?.sub),
       );
@@ -332,15 +469,27 @@ export function DashboardShell({
           ? error.message
           : "Unable to load auth status from the local API.",
       );
+    } finally {
+      setIsRefreshingAuthStatus(false);
     }
-  });
+  }, [authEnabled, user?.sub]);
 
   useEffect(() => {
     void refreshAuthStatus();
-  }, [authEnabled, user?.sub]);
+  }, [refreshAuthStatus]);
+
+  const refreshWorkspace = useCallback(async () => {
+    await Promise.all([refreshSnapshot(), refreshAuthStatus()]);
+  }, [refreshAuthStatus, refreshSnapshot]);
 
   const effectiveTokenVaultConfigured =
     authStatus?.tokenVault.configured ?? tokenVaultConfigured;
+  const pendingApprovalsCount = snapshot.approvals.filter(
+    (approval) => approval.status === "pending",
+  ).length;
+  const hasUnsavedSetupChanges =
+    JSON.stringify(createSetupPayload(setupDraft)) !==
+    JSON.stringify(createSetupPayload(createSetupDraft(snapshot)));
 
   function selectView(nextView: ViewKey) {
     setActiveView(nextView);
@@ -385,7 +534,7 @@ export function DashboardShell({
       () =>
         fetchJson<DemoState>("/api/setup", {
           method: "POST",
-          body: JSON.stringify(setupDraft),
+          body: JSON.stringify(createSetupPayload(setupDraft)),
         }),
       "Setup changes saved.",
     );
@@ -531,10 +680,110 @@ export function DashboardShell({
     setNewBreak({ name: "", startsOn: "", endsOn: "" });
   }
 
+  function openWorkflowStage(stage: WorkflowStage) {
+    selectView(getViewForStage(stage));
+  }
+
+  function updateContactField(
+    contactId: string,
+    field: keyof Omit<Contact, "id">,
+    value: string,
+  ) {
+    setSetupDraft((current) => ({
+      ...current,
+      contacts: current.contacts.map((contact) =>
+        contact.id === contactId
+          ? {
+              ...contact,
+              [field]: value,
+            }
+          : contact,
+      ),
+    }));
+  }
+
+  function removeContact(contactId: string) {
+    setSetupDraft((current) => ({
+      ...current,
+      contacts: current.contacts.filter((contact) => contact.id !== contactId),
+    }));
+  }
+
+  function updateBreakField(
+    breakId: string,
+    field: keyof Omit<SchoolBreak, "id">,
+    value: string,
+  ) {
+    setSetupDraft((current) => ({
+      ...current,
+      schoolBreaks: current.schoolBreaks.map((schoolBreak) =>
+        schoolBreak.id === breakId
+          ? {
+              ...schoolBreak,
+              [field]: value,
+            }
+          : schoolBreak,
+      ),
+    }));
+  }
+
+  function removeBreak(breakId: string) {
+    setSetupDraft((current) => ({
+      ...current,
+      schoolBreaks: current.schoolBreaks.filter(
+        (schoolBreak) => schoolBreak.id !== breakId,
+      ),
+    }));
+  }
+
+  function setCurrentWorkflowStage(stage: WorkflowStage) {
+    setSetupDraft((current) => {
+      const activeIndex = current.planner.timeline.findIndex(
+        (entry) => entry.stage === stage,
+      );
+      const resolvedIndex = activeIndex === -1 ? 0 : activeIndex;
+
+      return {
+        ...current,
+        planner: {
+          ...current.planner,
+          currentStage:
+            current.planner.timeline[resolvedIndex]?.stage ?? stage,
+          timeline: current.planner.timeline.map((entry, index) => ({
+            ...entry,
+            status:
+              index < resolvedIndex
+                ? "done"
+                : index === resolvedIndex
+                  ? "active"
+                  : "upcoming",
+          })),
+        },
+      };
+    });
+  }
+
+  function updateWorkflowTargetTime(stage: WorkflowStage, value: string) {
+    setSetupDraft((current) => ({
+      ...current,
+      planner: {
+        ...current.planner,
+        timeline: current.planner.timeline.map((entry) =>
+          entry.stage === stage
+            ? {
+                ...entry,
+                targetTime: toIsoDateTime(value),
+              }
+            : entry,
+        ),
+      },
+    }));
+  }
+
   return (
     <div className="relative min-h-screen overflow-hidden px-4 py-4 sm:px-6 lg:px-8">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-80 bg-[radial-gradient(circle_at_16%_12%,rgba(45,200,255,0.18),transparent_32%),radial-gradient(circle_at_84%_8%,rgba(73,112,255,0.2),transparent_28%)]" />
-      <div className="relative mx-auto grid max-w-[1680px] gap-4 xl:grid-cols-[280px_minmax(0,1fr)_360px]">
+      <div className="relative mx-auto grid max-w-[1680px] gap-5 xl:grid-cols-[260px_minmax(0,1fr)] 2xl:grid-cols-[260px_minmax(0,1fr)_320px]">
         <aside className="xl:sticky xl:top-4 xl:self-start">
           <Card className="brand-panel">
             <CardHeader>
@@ -563,7 +812,9 @@ export function DashboardShell({
                       {snapshot.workspaceTitle}
                     </p>
                   </div>
-                  <Badge variant="secondary">{snapshot.planner.currentStage}</Badge>
+                  <Badge variant="secondary">
+                    {formatDisplayLabel(snapshot.planner.currentStage)}
+                  </Badge>
                 </div>
                 <Separator className="my-4" />
                 <div className="space-y-3">
@@ -571,23 +822,7 @@ export function DashboardShell({
                     <button
                       key={stage.stage}
                       type="button"
-                      onClick={() => {
-                        if (stage.stage === "collect_updates") {
-                          selectView("inbox");
-                          return;
-                        }
-                        if (stage.stage === "wednesday_draft") {
-                          selectView("newsletter");
-                          return;
-                        }
-                        if (
-                          stage.stage === "monday_reminder" ||
-                          stage.stage === "thursday_teacher_release" ||
-                          stage.stage === "sunday_parent_schedule"
-                        ) {
-                          selectView("actions");
-                        }
-                      }}
+                      onClick={() => openWorkflowStage(stage.stage)}
                       className="flex w-full items-start justify-between rounded-2xl border border-transparent px-3 py-2 text-left transition hover:border-border hover:bg-muted/60"
                     >
                       <div>
@@ -597,7 +832,7 @@ export function DashboardShell({
                         </p>
                       </div>
                       <Badge variant={statusBadgeVariant(stage.status)}>
-                        {stage.status}
+                        {formatDisplayLabel(stage.status)}
                       </Badge>
                     </button>
                   ))}
@@ -692,8 +927,8 @@ export function DashboardShell({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => void refreshSnapshot()}
-                  disabled={isMutating}
+                  onClick={() => void refreshWorkspace()}
+                  disabled={isMutating || isRefreshingAuthStatus}
                 >
                   <ArrowClockwise className="size-4" />
                   Refresh
@@ -719,7 +954,9 @@ export function DashboardShell({
               gmailConnectUrl={gmailConnectUrl}
               authStatus={authStatus}
               authStatusError={authStatusError}
+              isRefreshingAuthStatus={isRefreshingAuthStatus}
               user={user}
+              onRefreshAuthStatus={() => void refreshAuthStatus()}
               onAuth0EmailChange={(value) =>
                 setSetupDraft((current) => ({
                   ...current,
@@ -729,11 +966,20 @@ export function DashboardShell({
               onIntegrationModeChange={updateIntegrationMode}
               onAddContact={addContactToDraft}
               onAddBreak={addBreakToDraft}
+              onUpdateContact={updateContactField}
+              onRemoveContact={removeContact}
+              onUpdateBreak={updateBreakField}
+              onRemoveBreak={removeBreak}
+              onSetCurrentWorkflowStage={setCurrentWorkflowStage}
+              onUpdateWorkflowTargetTime={updateWorkflowTargetTime}
+              onOpenWorkflowStage={openWorkflowStage}
               newContact={newContact}
               newBreak={newBreak}
               setNewContact={setNewContact}
               setNewBreak={setNewBreak}
               onSave={() => void saveSetupDraft()}
+              hasUnsavedChanges={hasUnsavedSetupChanges}
+              pendingApprovalsCount={pendingApprovalsCount}
               isMutating={isMutating}
             />
           ) : null}
@@ -783,7 +1029,7 @@ export function DashboardShell({
           {activeView === "audit" ? <AuditView state={snapshot} /> : null}
         </main>
 
-        <aside className="xl:sticky xl:top-4 xl:self-start">
+        <aside className="xl:col-start-2 2xl:col-start-auto 2xl:sticky 2xl:top-4 2xl:self-start">
           <Card className="brand-panel">
             <CardHeader>
               <CardTitle>Approvals and action log</CardTitle>
@@ -803,11 +1049,12 @@ export function DashboardShell({
                       <div>
                         <p className="text-sm font-medium">{approval.title}</p>
                         <p className="text-xs text-muted-foreground">
-                          {approval.channel} • {approval.audience}
+                          {formatDisplayLabel(approval.channel)} •{" "}
+                          {formatDisplayLabel(approval.audience)}
                         </p>
                       </div>
                       <Badge variant={statusBadgeVariant(approval.status)}>
-                        {approval.status}
+                        {formatDisplayLabel(approval.status)}
                       </Badge>
                     </div>
                     <p className="mt-2 text-xs text-muted-foreground">
@@ -827,14 +1074,16 @@ export function DashboardShell({
                       className="rounded-2xl border border-border/80 bg-background/80 p-4"
                     >
                       <div className="flex items-center justify-between gap-3">
-                        <Badge variant="outline">{entry.integration}</Badge>
+                        <Badge variant="outline">
+                          {formatDisplayLabel(entry.integration)}
+                        </Badge>
                         <span className="text-xs text-muted-foreground">
                           {formatDateTime(entry.timestamp)}
                         </span>
                       </div>
                       <p className="mt-2 text-sm font-medium">{entry.summary}</p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {entry.kind}
+                        {formatDisplayLabel(entry.kind)}
                       </p>
                     </div>
                   ))}
@@ -854,16 +1103,27 @@ function SetupView({
   gmailConnectUrl,
   authStatus,
   authStatusError,
+  isRefreshingAuthStatus,
   user,
+  onRefreshAuthStatus,
   onAuth0EmailChange,
   onIntegrationModeChange,
   onAddContact,
   onAddBreak,
+  onUpdateContact,
+  onRemoveContact,
+  onUpdateBreak,
+  onRemoveBreak,
+  onSetCurrentWorkflowStage,
+  onUpdateWorkflowTargetTime,
+  onOpenWorkflowStage,
   newContact,
   newBreak,
   setNewContact,
   setNewBreak,
   onSave,
+  hasUnsavedChanges,
+  pendingApprovalsCount,
   isMutating,
 }: {
   setupDraft: SetupDraft;
@@ -871,7 +1131,9 @@ function SetupView({
   gmailConnectUrl: string;
   authStatus: AuthStatusResponse | null;
   authStatusError: string | null;
+  isRefreshingAuthStatus: boolean;
   user?: Viewer | null;
+  onRefreshAuthStatus: () => void;
   onAuth0EmailChange: (value: string) => void;
   onIntegrationModeChange: (
     key: keyof SetupDraft["integrations"],
@@ -879,6 +1141,21 @@ function SetupView({
   ) => void;
   onAddContact: () => void;
   onAddBreak: () => void;
+  onUpdateContact: (
+    contactId: string,
+    field: keyof Omit<Contact, "id">,
+    value: string,
+  ) => void;
+  onRemoveContact: (contactId: string) => void;
+  onUpdateBreak: (
+    breakId: string,
+    field: keyof Omit<SchoolBreak, "id">,
+    value: string,
+  ) => void;
+  onRemoveBreak: (breakId: string) => void;
+  onSetCurrentWorkflowStage: (stage: WorkflowStage) => void;
+  onUpdateWorkflowTargetTime: (stage: WorkflowStage, value: string) => void;
+  onOpenWorkflowStage: (stage: WorkflowStage) => void;
   newContact: { name: string; role: string; email: string };
   newBreak: { name: string; startsOn: string; endsOn: string };
   setNewContact: Dispatch<
@@ -888,6 +1165,8 @@ function SetupView({
     SetStateAction<{ name: string; startsOn: string; endsOn: string }>
   >;
   onSave: () => void;
+  hasUnsavedChanges: boolean;
+  pendingApprovalsCount: number;
   isMutating: boolean;
 }) {
   const integrationEntries = (
@@ -923,8 +1202,16 @@ function SetupView({
 
   const liveGmailBadge: { variant: BadgeVariant; label: string } = authStatus
     ? {
-        variant: authStatus.gmail.liveReady ? "default" : "secondary",
-        label: authStatus.gmail.liveReady ? "live ready" : "not ready",
+        variant: authStatus.gmail.liveReady
+          ? "default"
+          : authStatus.gmail.connected
+            ? "secondary"
+            : "outline",
+        label: authStatus.gmail.liveReady
+          ? "live ready"
+          : authStatus.gmail.connected
+            ? "live blocked"
+            : "awaiting connect",
       }
     : authStatusError
       ? {
@@ -951,6 +1238,21 @@ function SetupView({
           label: "checking",
         };
 
+  const connectionBadge: { variant: BadgeVariant; label: string } = authStatus
+    ? {
+        variant: authStatus.gmail.connected ? "default" : "outline",
+        label: authStatus.gmail.connected ? "connected" : "not connected",
+      }
+    : authStatusError
+      ? {
+          variant: "outline" as const,
+          label: "unknown",
+        }
+      : {
+          variant: "secondary" as const,
+          label: user?.email ? "checking" : "signed out",
+        };
+
   const actionPathLabel = authStatus
     ? authStatus.gmail.actionPath === "identity_provider"
       ? "identity fallback"
@@ -963,259 +1265,577 @@ function SetupView({
 
   const authStatusNote = authStatusError
     ? "Live auth status could not be loaded from the local API. Reload after the API is up, or verify the `/api/auth/status` response in the browser."
-    : authStatus?.gmail.note ??
-      "Sign in with Auth0 and request Gmail scopes to verify Token Vault connection status.";
+    : authStatus
+      ? authStatus.gmail.liveReady
+        ? authStatus.gmail.note
+        : authStatus.gmail.connected
+          ? `Gmail is connected, but PTA Pilot cannot run live Gmail actions yet. ${authStatus.gmail.note}`
+          : authStatus.gmail.note
+      : "Sign in with Auth0 and request Gmail scopes to verify Token Vault connection status.";
+
+  const gmailActionLabel = !user?.email
+    ? "Log in with Google + Gmail"
+    : !authStatus
+      ? "Manage Gmail access"
+      : authStatus.gmail.liveReady
+        ? "Manage Gmail access"
+        : authStatus.gmail.connected
+          ? "Retry Gmail access"
+          : "Connect Gmail";
+  const activeStage =
+    setupDraft.planner.timeline.find(
+      (entry) => entry.stage === setupDraft.planner.currentStage,
+    ) ?? setupDraft.planner.timeline[0];
+  const workflowAction = getStageActionCopy(setupDraft.planner.currentStage);
+  const liveModeCount = integrationEntries.filter(
+    ([, integration]) => integration.mode === "live",
+  ).length;
+  const primaryActionLabel = hasUnsavedChanges
+    ? "Save workspace changes"
+    : workflowAction.buttonLabel;
+  const primaryActionDescription = hasUnsavedChanges
+    ? "Contacts, school breaks, integration modes, and workflow timing edits stay local until you save them."
+    : workflowAction.description;
 
   return (
-    <div className="grid gap-4 2xl:grid-cols-[1.1fr_0.9fr]">
-      <Card className="brand-panel">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <ShieldCheck className="size-4" />
-            Auth and integrations
-          </CardTitle>
-          <CardDescription>
-            Configure demo identity, Token Vault status, and mock/live adapter
-            modes.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="auth0-email">Auth0 account email</Label>
-              <Input
-                id="auth0-email"
-                value={setupDraft.auth0AccountEmail}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  onAuth0EmailChange(event.target.value)
+    <div className="space-y-5">
+      <Card className="brand-panel overflow-hidden">
+        <CardContent className="grid gap-5 pt-6 xl:grid-cols-[minmax(0,1.2fr)_320px]">
+          <div className="rounded-[1.9rem] border border-primary/20 bg-[linear-gradient(135deg,rgba(45,200,255,0.18),rgba(11,21,36,0.92)_45%,rgba(8,15,28,0.98)_100%)] p-6">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={hasUnsavedChanges ? "secondary" : "outline"}>
+                {hasUnsavedChanges ? "Unsaved workspace edits" : "Workspace saved"}
+              </Badge>
+              <Badge variant="outline">
+                Current stage {formatDisplayLabel(setupDraft.planner.currentStage)}
+              </Badge>
+            </div>
+            <p className="mt-5 text-xs font-semibold tracking-[0.24em] text-primary/[0.85] uppercase">
+              Next action
+            </p>
+            <h2 className="mt-2 max-w-2xl text-2xl font-semibold tracking-tight">
+              {hasUnsavedChanges
+                ? "Save the workspace before moving to the next step."
+                : workflowAction.title}
+            </h2>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
+              {primaryActionDescription}
+            </p>
+            <div className="mt-5 flex flex-wrap gap-3">
+              <Button
+                onClick={
+                  hasUnsavedChanges
+                    ? onSave
+                    : () => onOpenWorkflowStage(setupDraft.planner.currentStage)
                 }
-                placeholder="you@example.com"
-              />
-              <p className="text-xs text-muted-foreground">
-                Current web session: {user?.email ?? "guest demo"} • Auth0{" "}
-                {authEnabled ? "enabled" : "not configured yet"}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-border/80 bg-background/70 p-4">
-              <p className="text-sm font-medium">Human approval guardrail</p>
-              <p className="mt-2 text-sm text-muted-foreground">
-                PTA Pilot never silently sends, publishes, or schedules. The
-                right rail remains the control point for risky actions.
-              </p>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-border/80 bg-background/70 p-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-sm font-medium">Live Gmail via Token Vault</p>
-                  <Badge variant={liveGmailBadge.variant}>{liveGmailBadge.label}</Badge>
-                  <Badge variant={managementBadge.variant}>
-                    Mgmt API {managementBadge.label}
-                  </Badge>
-                  <Badge variant="outline">
-                    Path {actionPathLabel}
-                  </Badge>
-                </div>
-                <p className="text-sm text-muted-foreground">{authStatusNote}</p>
-                <div className="flex flex-wrap gap-2">
-                  {(authStatus?.gmail.grantedScopes ?? []).map((scope) => (
-                    <Badge key={scope} variant="outline">
-                      {scope.replace("https://www.googleapis.com/auth/", "gmail:")}
-                    </Badge>
-                  ))}
-                  {(authStatus?.gmail.missingScopes ?? []).map((scope) => (
-                    <Badge key={scope} variant="destructive">
-                      missing: {scope.replace("https://www.googleapis.com/auth/", "gmail:")}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button asChild size="sm">
-                  <a href={gmailConnectUrl}>
-                    {user?.email ? "Reconnect Gmail" : "Log in with Google + Gmail"}
-                  </a>
-                </Button>
-                {authEnabled && user?.email ? (
-                  <Button asChild variant="outline" size="sm">
-                    <a href="/auth/profile">View Auth0 profile</a>
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            {integrationEntries.map(([key, integration]) => (
-              <div
-                key={key}
-                className="rounded-2xl border border-border/80 bg-background/70 p-4"
+                disabled={isMutating}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium capitalize">
-                      {key.replace(/([A-Z])/g, " $1")}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {integration.description}
-                    </p>
-                  </div>
-                  <Badge variant={statusBadgeVariant(integration.status)}>
-                    {integration.status}
-                  </Badge>
-                </div>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {(["mock", "live", "manual"] as IntegrationMode[]).map((mode) => (
-                    <Button
-                      key={mode}
-                      type="button"
-                      size="xs"
-                      variant={integration.mode === mode ? "default" : "outline"}
-                      onClick={() => onIntegrationModeChange(key, mode)}
-                      disabled={
-                        key === "mockMessages" && mode !== "mock"
-                      }
-                    >
-                      {mode}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            ))}
+                {primaryActionLabel}
+                <ArrowRight className="size-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onOpenWorkflowStage(setupDraft.planner.currentStage)}
+              >
+                Open {formatDisplayLabel(getViewForStage(setupDraft.planner.currentStage))}
+              </Button>
+            </div>
+            {activeStage ? (
+              <p className="mt-4 text-xs text-muted-foreground">
+                Current focus: {activeStage.label} scheduled for{" "}
+                {formatDateTime(activeStage.targetTime)}.
+              </p>
+            ) : null}
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+            <div className="rounded-[1.7rem] border border-border/80 bg-background/75 p-5">
+              <p className="text-xs font-semibold tracking-[0.22em] text-muted-foreground uppercase">
+                Recipients
+              </p>
+              <p className="mt-3 text-3xl font-semibold">{setupDraft.contacts.length}</p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Editable recurring contacts for reviewers, staff, and PTA leads.
+              </p>
+            </div>
+            <div className="rounded-[1.7rem] border border-border/80 bg-background/75 p-5">
+              <p className="text-xs font-semibold tracking-[0.22em] text-muted-foreground uppercase">
+                Calendar checks
+              </p>
+              <p className="mt-3 text-3xl font-semibold">{setupDraft.schoolBreaks.length}</p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Break windows that can pause the Sunday parent send.
+              </p>
+            </div>
+            <div className="rounded-[1.7rem] border border-border/80 bg-background/75 p-5">
+              <p className="text-xs font-semibold tracking-[0.22em] text-muted-foreground uppercase">
+                Pending approvals
+              </p>
+              <p className="mt-3 text-3xl font-semibold">{pendingApprovalsCount}</p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Approval items waiting before send, publish, or schedule.
+              </p>
+            </div>
+            <div className="rounded-[1.7rem] border border-border/80 bg-background/75 p-5">
+              <p className="text-xs font-semibold tracking-[0.22em] text-muted-foreground uppercase">
+                Live modes
+              </p>
+              <p className="mt-3 text-3xl font-semibold">{liveModeCount}</p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Integrations currently configured to run live.
+              </p>
+            </div>
           </div>
         </CardContent>
-        <CardFooter className="border-t">
-          <Button onClick={onSave} disabled={isMutating}>
-            Save setup
-          </Button>
-        </CardFooter>
       </Card>
 
-      <div className="space-y-4">
-        <Card className="brand-panel">
-          <CardHeader>
-            <CardTitle>Recurring contacts</CardTitle>
-            <CardDescription>
-              Principal, Teacher Rep, and PTA board reviewers for recurring
-              workflow messages.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-3">
-              {setupDraft.contacts.map((contact) => (
-                <div
-                  key={contact.id}
-                  className="rounded-2xl border border-border/80 bg-background/70 p-4"
-                >
-                  <p className="text-sm font-medium">{contact.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {contact.role} • {contact.email}
-                  </p>
-                </div>
-              ))}
-            </div>
-            <Separator />
-            <div className="grid gap-3 md:grid-cols-3">
-              <Input
-                placeholder="Name"
-                value={newContact.name}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setNewContact((current) => ({
-                    ...current,
-                    name: event.target.value,
-                  }))
-                }
-              />
-              <Input
-                placeholder="Role"
-                value={newContact.role}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setNewContact((current) => ({
-                    ...current,
-                    role: event.target.value,
-                  }))
-                }
-              />
-              <Input
-                placeholder="Email"
-                type="email"
-                value={newContact.email}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setNewContact((current) => ({
-                    ...current,
-                    email: event.target.value,
-                  }))
-                }
-              />
-            </div>
-            <Button variant="outline" size="sm" onClick={onAddContact}>
-              Add contact
-            </Button>
-          </CardContent>
-        </Card>
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+        <div className="space-y-5">
+          <Card className="brand-panel">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ListChecks className="size-4" />
+                Workflow controls
+              </CardTitle>
+              <CardDescription>
+                Adjust timing and set the current workflow focus without leaving setup.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {setupDraft.planner.timeline.map((entry) => {
+                const isCurrentStage = entry.stage === setupDraft.planner.currentStage;
 
-        <Card className="brand-panel">
-          <CardHeader>
-            <CardTitle>School breaks</CardTitle>
-            <CardDescription>
-              Sunday scheduling checks this calendar before allowing parent
-              newsletter release.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-3">
-              {setupDraft.schoolBreaks.map((schoolBreak) => (
-                <div
-                  key={schoolBreak.id}
-                  className="rounded-2xl border border-border/80 bg-background/70 p-4"
-                >
-                  <p className="text-sm font-medium">{schoolBreak.name}</p>
+                return (
+                  <div
+                    key={entry.stage}
+                    className={cn(
+                      "rounded-[1.7rem] border p-4",
+                      isCurrentStage
+                        ? "border-primary/30 bg-primary/[0.08]"
+                        : "border-border/80 bg-background/70",
+                    )}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium">{entry.label}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Routes to {formatDisplayLabel(getViewForStage(entry.stage))}.
+                        </p>
+                      </div>
+                      <Badge
+                        variant={isCurrentStage ? "default" : statusBadgeVariant(entry.status)}
+                      >
+                        {isCurrentStage
+                          ? "Current focus"
+                          : formatDisplayLabel(entry.status)}
+                      </Badge>
+                    </div>
+                    <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
+                      <div className="space-y-2">
+                        <Label htmlFor={`workflow-${entry.stage}`}>Scheduled time</Label>
+                        <Input
+                          id={`workflow-${entry.stage}`}
+                          type="datetime-local"
+                          value={formatDateTimeInput(entry.targetTime)}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            onUpdateWorkflowTargetTime(entry.stage, event.target.value)
+                          }
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={isCurrentStage ? "secondary" : "outline"}
+                        className="self-end"
+                        onClick={() => onSetCurrentWorkflowStage(entry.stage)}
+                      >
+                        {isCurrentStage ? "Current stage" : "Set current stage"}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="self-end"
+                        onClick={() => onOpenWorkflowStage(entry.stage)}
+                      >
+                        Open view
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+
+          <Card className="brand-panel">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ShieldCheck className="size-4" />
+                Auth and integrations
+              </CardTitle>
+              <CardDescription>
+                Configure demo identity, Token Vault status, and adapter modes in one place.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="auth0-email">Auth0 account email</Label>
+                  <Input
+                    id="auth0-email"
+                    value={setupDraft.auth0AccountEmail}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                      onAuth0EmailChange(event.target.value)
+                    }
+                    placeholder="you@example.com"
+                  />
                   <p className="text-xs text-muted-foreground">
-                    {schoolBreak.startsOn} to {schoolBreak.endsOn}
+                    Current web session: {user?.email ?? "guest demo"} • Auth0{" "}
+                    {authEnabled ? "enabled" : "not configured yet"}
                   </p>
                 </div>
-              ))}
-            </div>
-            <Separator />
-            <div className="grid gap-3 md:grid-cols-3">
-              <Input
-                placeholder="Break name"
-                value={newBreak.name}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setNewBreak((current) => ({
-                    ...current,
-                    name: event.target.value,
-                  }))
-                }
-              />
-              <Input
-                type="date"
-                value={newBreak.startsOn}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setNewBreak((current) => ({
-                    ...current,
-                    startsOn: event.target.value,
-                  }))
-                }
-              />
-              <Input
-                type="date"
-                value={newBreak.endsOn}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setNewBreak((current) => ({
-                    ...current,
-                    endsOn: event.target.value,
-                  }))
-                }
-              />
-            </div>
-            <Button variant="outline" size="sm" onClick={onAddBreak}>
-              Add break
-            </Button>
-          </CardContent>
-        </Card>
+                <div className="rounded-[1.7rem] border border-border/80 bg-background/70 p-4">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <CheckCircle className="size-4 text-primary" />
+                    Human approval guardrail
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    PTA Pilot never silently sends, publishes, or schedules. The action rail remains the final checkpoint for risky operations.
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-[1.7rem] border border-border/80 bg-background/70 p-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium">Live Gmail via Token Vault</p>
+                      <Badge variant={connectionBadge.variant}>{connectionBadge.label}</Badge>
+                      <Badge variant={liveGmailBadge.variant}>{liveGmailBadge.label}</Badge>
+                      <Badge variant={managementBadge.variant}>
+                        Mgmt API {managementBadge.label}
+                      </Badge>
+                      <Badge variant="outline">Path {actionPathLabel}</Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground">{authStatusNote}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {(authStatus?.gmail.grantedScopes ?? []).map((scope) => (
+                        <Badge key={scope} variant="outline">
+                          {scope.replace("https://www.googleapis.com/auth/", "gmail:")}
+                        </Badge>
+                      ))}
+                      {(authStatus?.gmail.missingScopes ?? []).map((scope) => (
+                        <Badge key={scope} variant="destructive">
+                          missing: {scope.replace("https://www.googleapis.com/auth/", "gmail:")}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button asChild size="sm">
+                      <a href={gmailConnectUrl}>{gmailActionLabel}</a>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={onRefreshAuthStatus}
+                      disabled={!authEnabled || isRefreshingAuthStatus}
+                    >
+                      <ArrowClockwise className="size-4" />
+                      {isRefreshingAuthStatus ? "Checking" : "Check status"}
+                    </Button>
+                    {authEnabled && user?.email ? (
+                      <Button asChild variant="outline" size="sm">
+                        <a href="/auth/profile">View Auth0 profile</a>
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                {integrationEntries.map(([key, integration]) => (
+                  <div
+                    key={key}
+                    className="rounded-[1.7rem] border border-border/80 bg-background/70 p-4"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium">
+                          {formatDisplayLabel(key)}
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                          {integration.description}
+                        </p>
+                      </div>
+                      <Badge
+                        variant={statusBadgeVariant(integration.status)}
+                        className="self-start"
+                      >
+                        {formatDisplayLabel(integration.status)}
+                      </Badge>
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {(["mock", "live", "manual"] as IntegrationMode[]).map((mode) => (
+                        <Button
+                          key={mode}
+                          type="button"
+                          size="xs"
+                          variant={integration.mode === mode ? "default" : "outline"}
+                          onClick={() => onIntegrationModeChange(key, mode)}
+                          disabled={key === "mockMessages" && mode !== "mock"}
+                        >
+                          {formatDisplayLabel(mode)}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+            <CardFooter className="flex flex-wrap gap-2 border-t">
+              <Button onClick={onSave} disabled={isMutating || !hasUnsavedChanges}>
+                {hasUnsavedChanges ? "Save workspace changes" : "All changes saved"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onOpenWorkflowStage(setupDraft.planner.currentStage)}
+              >
+                Open {formatDisplayLabel(getViewForStage(setupDraft.planner.currentStage))}
+              </Button>
+            </CardFooter>
+          </Card>
+        </div>
+
+        <div className="space-y-5">
+          <Card className="brand-panel">
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between gap-3">
+                <span>Recurring contacts</span>
+                <Badge variant="outline">{setupDraft.contacts.length}</Badge>
+              </CardTitle>
+              <CardDescription>
+                Edit or remove reviewers inline, then add new contacts below.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {setupDraft.contacts.length ? (
+                <div className="space-y-3">
+                  {setupDraft.contacts.map((contact) => (
+                    <div
+                      key={contact.id}
+                      className="rounded-[1.7rem] border border-border/80 bg-background/70 p-4"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium">
+                            {contact.name || "Untitled contact"}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Used for recurring routing and review lists.
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => onRemoveContact(contact.id)}
+                          aria-label={`Delete ${contact.name || "contact"}`}
+                        >
+                          <Trash className="size-4" />
+                        </Button>
+                      </div>
+                      <div className="mt-4 grid gap-3 md:grid-cols-3">
+                        <Input
+                          placeholder="Name"
+                          value={contact.name}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            onUpdateContact(contact.id, "name", event.target.value)
+                          }
+                        />
+                        <Input
+                          placeholder="Role"
+                          value={contact.role}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            onUpdateContact(contact.id, "role", event.target.value)
+                          }
+                        />
+                        <Input
+                          placeholder="Email"
+                          type="email"
+                          value={contact.email}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            onUpdateContact(contact.id, "email", event.target.value)
+                          }
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-[1.7rem] border border-dashed border-border/80 bg-background/60 p-4 text-sm text-muted-foreground">
+                  No recurring contacts yet. Add the people who should receive recurring board, teacher, and school communication workflows.
+                </div>
+              )}
+
+              <div className="rounded-[1.7rem] border border-dashed border-primary/20 bg-primary/[0.06] p-4">
+                <p className="text-sm font-medium">Add contact</p>
+                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                  <Input
+                    placeholder="Name"
+                    value={newContact.name}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                      setNewContact((current) => ({
+                        ...current,
+                        name: event.target.value,
+                      }))
+                    }
+                  />
+                  <Input
+                    placeholder="Role"
+                    value={newContact.role}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                      setNewContact((current) => ({
+                        ...current,
+                        role: event.target.value,
+                      }))
+                    }
+                  />
+                  <Input
+                    placeholder="Email"
+                    type="email"
+                    value={newContact.email}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                      setNewContact((current) => ({
+                        ...current,
+                        email: event.target.value,
+                      }))
+                    }
+                  />
+                </div>
+                <Button className="mt-4" variant="outline" size="sm" onClick={onAddContact}>
+                  Add contact
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="brand-panel">
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between gap-3">
+                <span>School breaks</span>
+                <Badge variant="outline">{setupDraft.schoolBreaks.length}</Badge>
+              </CardTitle>
+              <CardDescription>
+                Maintain the break calendar that gates the Sunday parent schedule.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {setupDraft.schoolBreaks.length ? (
+                <div className="space-y-3">
+                  {setupDraft.schoolBreaks.map((schoolBreak) => (
+                    <div
+                      key={schoolBreak.id}
+                      className="rounded-[1.7rem] border border-border/80 bg-background/70 p-4"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium">
+                            {schoolBreak.name || "Untitled break"}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Saved breaks are checked before the parent newsletter is scheduled.
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => onRemoveBreak(schoolBreak.id)}
+                          aria-label={`Delete ${schoolBreak.name || "break"}`}
+                        >
+                          <Trash className="size-4" />
+                        </Button>
+                      </div>
+                      <div className="mt-4 grid gap-3 md:grid-cols-3">
+                        <Input
+                          placeholder="Break name"
+                          value={schoolBreak.name}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            onUpdateBreak(schoolBreak.id, "name", event.target.value)
+                          }
+                        />
+                        <Input
+                          type="date"
+                          value={schoolBreak.startsOn}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            onUpdateBreak(schoolBreak.id, "startsOn", event.target.value)
+                          }
+                        />
+                        <Input
+                          type="date"
+                          value={schoolBreak.endsOn}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            onUpdateBreak(schoolBreak.id, "endsOn", event.target.value)
+                          }
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-[1.7rem] border border-dashed border-border/80 bg-background/60 p-4 text-sm text-muted-foreground">
+                  No school breaks saved yet. Add closures or vacation windows that should pause Sunday scheduling.
+                </div>
+              )}
+
+              <div className="rounded-[1.7rem] border border-dashed border-primary/20 bg-primary/[0.06] p-4">
+                <p className="text-sm font-medium">Add school break</p>
+                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                  <Input
+                    placeholder="Break name"
+                    value={newBreak.name}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                      setNewBreak((current) => ({
+                        ...current,
+                        name: event.target.value,
+                      }))
+                    }
+                  />
+                  <Input
+                    type="date"
+                    value={newBreak.startsOn}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                      setNewBreak((current) => ({
+                        ...current,
+                        startsOn: event.target.value,
+                      }))
+                    }
+                  />
+                  <Input
+                    type="date"
+                    value={newBreak.endsOn}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                      setNewBreak((current) => ({
+                        ...current,
+                        endsOn: event.target.value,
+                      }))
+                    }
+                  />
+                </div>
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Break checks refresh after you save the workspace.
+                </p>
+                <Button className="mt-4" variant="outline" size="sm" onClick={onAddBreak}>
+                  Add break
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );
@@ -1310,10 +1930,13 @@ function InboxView({
                     <div>
                       <p className="text-sm font-medium">{message.sender}</p>
                       <p className="text-xs text-muted-foreground">
-                        {message.source} • {formatDateTime(message.sentAt)}
+                        {formatDisplayLabel(message.source)} •{" "}
+                        {formatDateTime(message.sentAt)}
                       </p>
                     </div>
-                    <Badge variant="outline">{message.source}</Badge>
+                    <Badge variant="outline">
+                      {formatDisplayLabel(message.source)}
+                    </Badge>
                   </div>
                   <p className="mt-3 text-sm leading-6">{message.body}</p>
                   {message.imageUrl ? (
@@ -1352,7 +1975,7 @@ function InboxView({
                     }))
                   }
                 >
-                  {source}
+                  {formatDisplayLabel(source)}
                 </Button>
               ))}
             </div>
@@ -1412,13 +2035,17 @@ function InboxView({
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-sm font-medium">{item.title}</p>
                   <Badge variant={statusBadgeVariant(item.priority)}>
-                    {item.priority}
+                    {formatDisplayLabel(item.priority)}
                   </Badge>
                 </div>
                 <p className="mt-2 text-sm text-muted-foreground">{item.summary}</p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <Badge variant="outline">{item.source}</Badge>
-                  <Badge variant="outline">{item.recommendedPlacement}</Badge>
+                  <Badge variant="outline">
+                    {formatDisplayLabel(item.source)}
+                  </Badge>
+                  <Badge variant="outline">
+                    {formatDisplayLabel(item.recommendedPlacement)}
+                  </Badge>
                   {item.recommendedAsFlyer ? (
                     <Badge variant="secondary">Flyer candidate</Badge>
                   ) : null}
@@ -1460,7 +2087,9 @@ function NewsletterView({
               Duplicate last newsletter
             </Button>
             <Badge variant="outline">Audience: board</Badge>
-            <Badge variant="secondary">{state.newsletters.board.status}</Badge>
+            <Badge variant="secondary">
+              {formatDisplayLabel(state.newsletters.board.status)}
+            </Badge>
           </div>
           {state.newsletters.board.sections.map((section) => (
             <div
@@ -1470,7 +2099,9 @@ function NewsletterView({
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-medium">{section.title}</p>
-                  <p className="text-xs text-muted-foreground">{section.kind}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatDisplayLabel(section.kind)}
+                  </p>
                 </div>
                 <Badge variant="outline">{section.items.length} items</Badge>
               </div>
@@ -1488,13 +2119,13 @@ function NewsletterView({
                         </p>
                       </div>
                       <Badge variant={statusBadgeVariant(item.priority)}>
-                        {item.priority}
+                        {formatDisplayLabel(item.priority)}
                       </Badge>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       {item.sourceBadges.map((badge) => (
                         <Badge key={badge} variant="outline">
-                          {badge}
+                          {formatDisplayLabel(badge)}
                         </Badge>
                       ))}
                       {item.flyerRecommended ? (
@@ -1533,7 +2164,7 @@ function NewsletterView({
                     </p>
                   </div>
                   <Badge variant={statusBadgeVariant(state.newsletters[audience].status)}>
-                    {state.newsletters[audience].status}
+                    {formatDisplayLabel(state.newsletters[audience].status)}
                   </Badge>
                 </div>
                 <p className="mt-2 text-sm text-muted-foreground">
@@ -1567,7 +2198,9 @@ function NewsletterView({
                 <div className="p-4">
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-medium">{recommendation.title}</p>
-                    <Badge variant="secondary">{recommendation.status}</Badge>
+                    <Badge variant="secondary">
+                      {formatDisplayLabel(recommendation.status)}
+                    </Badge>
                   </div>
                   <p className="mt-2 text-sm text-muted-foreground">
                     {recommendation.reason}
@@ -1623,11 +2256,12 @@ function ActionsView({
               <CardTitle className="flex items-center justify-between gap-3">
                 <span>{approval.title}</span>
                 <Badge variant={statusBadgeVariant(approval.status)}>
-                  {approval.status}
+                  {formatDisplayLabel(approval.status)}
                 </Badge>
               </CardTitle>
               <CardDescription>
-                {approval.channel} • {approval.audience} • created{" "}
+                {formatDisplayLabel(approval.channel)} •{" "}
+                {formatDisplayLabel(approval.audience)} • created{" "}
                 {formatDateTime(approval.createdAt)}
               </CardDescription>
             </CardHeader>
@@ -1648,7 +2282,7 @@ function ActionsView({
                     synced via{" "}
                     {approval.gmailExecution.deliveryPath === "identity_provider"
                       ? "Auth0 identity fallback"
-                      : approval.gmailExecution.deliveryPath}
+                      : formatDisplayLabel(approval.gmailExecution.deliveryPath)}
                   </p>
                   <p className="mt-1 text-xs text-emerald-900/80">
                     {approval.gmailExecution.note ?? "Live Gmail metadata is available for this action."}
@@ -1735,8 +2369,12 @@ function AuditView({ state }: { state: DemoState }) {
               >
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
-                    <Badge variant="outline">{entry.integration}</Badge>
-                    <Badge variant="secondary">{entry.kind}</Badge>
+                    <Badge variant="outline">
+                      {formatDisplayLabel(entry.integration)}
+                    </Badge>
+                    <Badge variant="secondary">
+                      {formatDisplayLabel(entry.kind)}
+                    </Badge>
                   </div>
                   <span className="text-xs text-muted-foreground">
                     {formatDateTime(entry.timestamp)}
