@@ -5,6 +5,7 @@ import {
   startTransition,
   useEffect,
   useEffectEvent,
+  useRef,
   useState,
   type ChangeEvent,
   type ComponentType,
@@ -31,7 +32,9 @@ import type {
   AudienceVersion,
   Contact,
   DemoState,
+  IntegrationConfig,
   IntegrationMode,
+  IntegrationStatus,
   SchoolBreak,
 } from "@pta-pilot/shared";
 import { seedDemoState } from "@pta-pilot/shared";
@@ -67,6 +70,16 @@ type Notice = {
   tone: "info" | "success" | "error";
   message: string;
 } | null;
+
+type BadgeVariant =
+  | "default"
+  | "secondary"
+  | "outline"
+  | "destructive"
+  | "ghost"
+  | "link"
+  | null
+  | undefined;
 
 type ApprovalDraftMap = Record<string, ApprovalEditInput>;
 
@@ -165,6 +178,47 @@ function withUserQuery(path: string, userId?: string | null) {
   return `${path}${separator}userId=${encodeURIComponent(userId)}`;
 }
 
+function getAuth0IntegrationDisplayStatus(
+  integration: IntegrationConfig,
+  authEnabled: boolean,
+  user?: Viewer | null,
+): IntegrationStatus {
+  if (user?.email) {
+    return "connected";
+  }
+
+  if (authEnabled) {
+    return "pending";
+  }
+
+  return integration.status;
+}
+
+function getGmailIntegrationDisplayStatus(
+  integration: IntegrationConfig,
+  authStatus: AuthStatusResponse | null,
+  user?: Viewer | null,
+): IntegrationStatus {
+  if (!authStatus) {
+    return user?.email ? "pending" : integration.status;
+  }
+
+  if (authStatus.gmail.liveReady) {
+    return "connected";
+  }
+
+  if (
+    authStatus.gmail.connected ||
+    authStatus.tokenVault.configured ||
+    authStatus.managementApi.configured ||
+    user?.email
+  ) {
+    return "pending";
+  }
+
+  return "needs_setup";
+}
+
 export function DashboardShell({
   authEnabled,
   gmailConnectUrl,
@@ -185,6 +239,7 @@ export function DashboardShell({
     createApprovalDrafts(seedDemoState.approvals),
   );
   const [authStatus, setAuthStatus] = useState<AuthStatusResponse | null>(null);
+  const [authStatusError, setAuthStatusError] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice>({
     tone: "info",
     message: "Loading the backend snapshot. Seeded data will be used if the API is offline.",
@@ -200,6 +255,7 @@ export function DashboardShell({
     startsOn: "",
     endsOn: "",
   });
+  const mainRef = useRef<HTMLElement | null>(null);
   const [mockMessageDraft, setMockMessageDraft] = useState<AddMockMessageInput>({
     source: "whatsapp",
     sender: "Demo sender",
@@ -240,6 +296,7 @@ export function DashboardShell({
   const refreshAuthStatus = useEffectEvent(async () => {
     if (!authEnabled) {
       setAuthStatus(null);
+      setAuthStatusError(null);
       return;
     }
 
@@ -248,14 +305,33 @@ export function DashboardShell({
         withUserQuery("/api/auth/status", user?.sub),
       );
       setAuthStatus(nextStatus);
-    } catch {
+      setAuthStatusError(null);
+    } catch (error) {
       setAuthStatus(null);
+      setAuthStatusError(
+        error instanceof Error
+          ? error.message
+          : "Unable to load auth status from the local API.",
+      );
     }
   });
 
   useEffect(() => {
     void refreshAuthStatus();
   }, [authEnabled, user?.sub]);
+
+  const effectiveTokenVaultConfigured =
+    authStatus?.tokenVault.configured ?? tokenVaultConfigured;
+
+  function selectView(nextView: ViewKey) {
+    setActiveView(nextView);
+    requestAnimationFrame(() => {
+      mainRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  }
 
   async function runMutation(
     label: string,
@@ -472,11 +548,11 @@ export function DashboardShell({
                       type="button"
                       onClick={() => {
                         if (stage.stage === "collect_updates") {
-                          setActiveView("inbox");
+                          selectView("inbox");
                           return;
                         }
                         if (stage.stage === "wednesday_draft") {
-                          setActiveView("newsletter");
+                          selectView("newsletter");
                           return;
                         }
                         if (
@@ -484,7 +560,7 @@ export function DashboardShell({
                           stage.stage === "thursday_teacher_release" ||
                           stage.stage === "sunday_parent_schedule"
                         ) {
-                          setActiveView("actions");
+                          selectView("actions");
                         }
                       }}
                       className="flex w-full items-start justify-between rounded-2xl border border-transparent px-3 py-2 text-left transition hover:border-border hover:bg-muted/60"
@@ -511,7 +587,7 @@ export function DashboardShell({
                   <button
                     key={key}
                     type="button"
-                    onClick={() => setActiveView(key)}
+                    onClick={() => selectView(key)}
                     className={cn(
                       "flex w-full items-center justify-between rounded-2xl border px-3 py-3 text-left transition",
                       activeView === key
@@ -539,13 +615,13 @@ export function DashboardShell({
           </Card>
         </aside>
 
-        <main className="space-y-4">
+        <main ref={mainRef} className="space-y-4">
           <Card className="border border-white/40 bg-white/80 backdrop-blur">
             <CardHeader>
               <CardTitle className="flex flex-wrap items-center gap-3">
                 <span>Believable hackathon demo flow</span>
-                <Badge variant={tokenVaultConfigured ? "default" : "secondary"}>
-                  Token Vault {tokenVaultConfigured ? "configured" : "scaffolded"}
+                <Badge variant={effectiveTokenVaultConfigured ? "default" : "secondary"}>
+                  Token Vault {effectiveTokenVaultConfigured ? "configured" : "scaffolded"}
                 </Badge>
                 <Badge variant={authEnabled ? "secondary" : "outline"}>
                   Auth0 {authEnabled ? "enabled" : "demo mode"}
@@ -607,6 +683,7 @@ export function DashboardShell({
               authEnabled={authEnabled}
               gmailConnectUrl={gmailConnectUrl}
               authStatus={authStatus}
+              authStatusError={authStatusError}
               user={user}
               onAuth0EmailChange={(value) =>
                 setSetupDraft((current) => ({
@@ -741,6 +818,7 @@ function SetupView({
   authEnabled,
   gmailConnectUrl,
   authStatus,
+  authStatusError,
   user,
   onAuth0EmailChange,
   onIntegrationModeChange,
@@ -757,6 +835,7 @@ function SetupView({
   authEnabled: boolean;
   gmailConnectUrl: string;
   authStatus: AuthStatusResponse | null;
+  authStatusError: string | null;
   user?: Viewer | null;
   onAuth0EmailChange: (value: string) => void;
   onIntegrationModeChange: (
@@ -776,6 +855,82 @@ function SetupView({
   onSave: () => void;
   isMutating: boolean;
 }) {
+  const integrationEntries = (
+    Object.entries(setupDraft.integrations) as Array<
+      [
+        keyof SetupDraft["integrations"],
+        SetupDraft["integrations"][keyof SetupDraft["integrations"]],
+      ]
+    >
+  ).map(([key, integration]) => {
+    if (key === "auth0") {
+      return [
+        key,
+        {
+          ...integration,
+          status: getAuth0IntegrationDisplayStatus(integration, authEnabled, user),
+        },
+      ] as const;
+    }
+
+    if (key === "gmail") {
+      return [
+        key,
+        {
+          ...integration,
+          status: getGmailIntegrationDisplayStatus(integration, authStatus, user),
+        },
+      ] as const;
+    }
+
+    return [key, integration] as const;
+  });
+
+  const liveGmailBadge: { variant: BadgeVariant; label: string } = authStatus
+    ? {
+        variant: authStatus.gmail.liveReady ? "default" : "secondary",
+        label: authStatus.gmail.liveReady ? "live ready" : "not ready",
+      }
+    : authStatusError
+      ? {
+          variant: "outline" as const,
+          label: "status unavailable",
+        }
+      : {
+          variant: "secondary" as const,
+          label: authEnabled ? "checking" : "demo mode",
+        };
+
+  const managementBadge: { variant: BadgeVariant; label: string } = authStatus
+    ? {
+        variant: authStatus.managementApi.configured ? "secondary" : "outline",
+        label: authStatus.managementApi.configured ? "configured" : "not configured",
+      }
+    : authStatusError
+      ? {
+          variant: "outline" as const,
+          label: "unavailable",
+        }
+      : {
+          variant: "secondary" as const,
+          label: "checking",
+        };
+
+  const actionPathLabel = authStatus
+    ? authStatus.gmail.actionPath === "identity_provider"
+      ? "identity fallback"
+      : authStatus.gmail.actionPath === "token_vault"
+        ? "token vault"
+        : "unavailable"
+    : authStatusError
+      ? "unavailable"
+      : "checking";
+
+  const authStatusNote = authStatusError
+    ? "Live auth status could not be loaded from the local API. Reload after the API is up, or verify the `/api/auth/status` response in the browser."
+    : authStatus?.gmail.note ??
+      "Sign in with Auth0 and request Gmail scopes to verify Token Vault connection status.";
+
   return (
     <div className="grid gap-4 2xl:grid-cols-[1.1fr_0.9fr]">
       <Card className="border border-white/40 bg-white/80 backdrop-blur">
@@ -820,36 +975,15 @@ function SetupView({
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="text-sm font-medium">Live Gmail via Token Vault</p>
-                  <Badge
-                    variant={
-                      authStatus?.gmail.liveReady ? "default" : "secondary"
-                    }
-                  >
-                    {authStatus?.gmail.liveReady ? "live ready" : "not ready"}
-                  </Badge>
-                  <Badge
-                    variant={
-                      authStatus?.managementApi.configured ? "secondary" : "outline"
-                    }
-                  >
-                    Mgmt API{" "}
-                    {authStatus?.managementApi.configured
-                      ? "configured"
-                      : "not configured"}
+                  <Badge variant={liveGmailBadge.variant}>{liveGmailBadge.label}</Badge>
+                  <Badge variant={managementBadge.variant}>
+                    Mgmt API {managementBadge.label}
                   </Badge>
                   <Badge variant="outline">
-                    Path{" "}
-                    {authStatus?.gmail.actionPath === "identity_provider"
-                      ? "identity fallback"
-                      : authStatus?.gmail.actionPath === "token_vault"
-                        ? "token vault"
-                        : "unavailable"}
+                    Path {actionPathLabel}
                   </Badge>
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  {authStatus?.gmail.note ??
-                    "Sign in with Auth0 and request Gmail scopes to verify Token Vault connection status."}
-                </p>
+                <p className="text-sm text-muted-foreground">{authStatusNote}</p>
                 <div className="flex flex-wrap gap-2">
                   {(authStatus?.gmail.grantedScopes ?? []).map((scope) => (
                     <Badge key={scope} variant="outline">
@@ -879,11 +1013,7 @@ function SetupView({
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            {(
-              Object.entries(setupDraft.integrations) as Array<
-                [keyof SetupDraft["integrations"], SetupDraft["integrations"][keyof SetupDraft["integrations"]]]
-              >
-            ).map(([key, integration]) => (
+            {integrationEntries.map(([key, integration]) => (
               <div
                 key={key}
                 className="rounded-2xl border border-border/80 bg-background/70 p-4"
