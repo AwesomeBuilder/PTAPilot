@@ -22,7 +22,7 @@ const envSchema = z.object({
   AUTH0_MANAGEMENT_CLIENT_SECRET: z.string().optional(),
   AUTH0_MANAGEMENT_API_SCOPE: z
     .string()
-    .default("read:users read:user_idp_tokens"),
+    .default("read:users read:user_idp_tokens read:federated_connections_tokensets"),
   AUTH0_TOKEN_VAULT_CONNECTION: z.string().optional(),
   AUTH0_TOKEN_VAULT_PROVIDER: z.string().default("google-oauth2"),
   AUTH0_TOKEN_VAULT_ACCOUNT_ID: z.string().optional(),
@@ -32,6 +32,11 @@ const envSchema = z.object({
     .default(
       "https://www.googleapis.com/auth/gmail.readonly,https://www.googleapis.com/auth/gmail.compose,https://www.googleapis.com/auth/gmail.send",
     ),
+  MEMBERSHIP_TOOLKIT_BASE_URL: z.string().url().optional(),
+  MEMBERSHIP_TOOLKIT_USERNAME: z.string().optional(),
+  MEMBERSHIP_TOOLKIT_PASSWORD: z.string().optional(),
+  MEMBERSHIP_TOOLKIT_STORAGE_STATE_PATH: z.string().optional(),
+  MEMBERSHIP_TOOLKIT_LOGIN_TIMEOUT_MS: z.coerce.number().default(30_000),
   GOOGLE_CLOUD_PROJECT: z.string().optional(),
   GOOGLE_CLOUD_LOCATION: z.string().default("us-central1"),
   VERTEX_MODEL: z.string().default("gemini-3.1-pro-preview"),

@@ -31,6 +31,23 @@ export const seedDemoState: DemoState = {
         email: "secretary@lincolnpta.org",
       },
     ],
+    memberRecipients: [
+      {
+        id: "member-avery-gomez",
+        name: "Avery Gomez",
+        email: "avery.gomez@gmail.com",
+      },
+      {
+        id: "member-sam-rivera",
+        name: "Sam Rivera",
+        email: "sam.rivera@gmail.com",
+      },
+      {
+        id: "member-priya-shah",
+        name: "Priya Shah",
+        email: "priya.shah@gmail.com",
+      },
+    ],
     schoolBreaks: [
       {
         id: "break-spring-2026",
@@ -172,7 +189,62 @@ export const seedDemoState: DemoState = {
           "https://images.unsplash.com/photo-1516117172878-fd2c41f4a759?auto=format&fit=crop&w=1200&q=80",
       },
     ],
+    artifacts: [
+      {
+        id: "artifact-last-newsletter-link",
+        type: "previous_newsletter_link",
+        label: "Previous newsletter link",
+        createdAt: "2026-03-23T08:04:00-07:00",
+        source: "manual",
+        originalUrl: "https://lincolnpta.membershiptoolkit.com/newsletter/last-week",
+        note: "Used for reminder copy and duplicate-last context until live publish writes direct links automatically.",
+      },
+      {
+        id: "artifact-calendar-screenshot",
+        type: "calendar_screenshot",
+        label: "April calendar screenshot",
+        createdAt: "2026-03-24T09:58:00-07:00",
+        source: "manual",
+        fileName: "april-calendar.png",
+        mimeType: "image/png",
+        storedPath: "apps/api/data/uploads/april-calendar.png",
+        extractedText:
+          "Thursday April 2 STEM Night 5:30 PM. Friday April 3 Coffee with the Principal 8:15 AM. Monday April 6 Spring Break begins.",
+      },
+    ],
     extractedItems: [
+      {
+        id: "extract-1",
+        title: "Attendance Spirit Week reminder",
+        summary: "Schoolwide attendance push should open the newsletter because it affects every family this week.",
+        source: "imessage",
+        sourceRef: "mock-msg-2",
+        priority: "urgent",
+        recommendedPlacement: "Top story",
+        recommendedAsFlyer: false,
+      },
+      {
+        id: "extract-2",
+        title: "STEM Night volunteer ask",
+        summary: "Need 4 setup volunteers and 2 cleanup helpers for Thursday STEM Night.",
+        source: "gmail",
+        sourceRef: "gmail-msg-2",
+        priority: "time_sensitive",
+        recommendedPlacement: "Events section",
+        recommendedAsFlyer: true,
+      },
+      {
+        id: "extract-3",
+        title: "Book Fair family shopping night",
+        summary: "Thursday 5:30-7:00 PM in the library for families.",
+        source: "whatsapp",
+        sourceRef: "mock-msg-1",
+        priority: "time_sensitive",
+        recommendedPlacement: "Events section",
+        recommendedAsFlyer: false,
+      },
+    ],
+    unplacedSuggestions: [
       {
         id: "extract-1",
         title: "Attendance Spirit Week reminder",
@@ -213,6 +285,11 @@ export const seedDemoState: DemoState = {
       summary: "Last week's published parent edition.",
       status: "published",
       publishedAt: "2026-03-16T18:00:00-07:00",
+      delivery: {
+        directUrl: "https://lincolnpta.membershiptoolkit.com/newsletter/last-week",
+        externalId: "mtk-last-week",
+        lastSyncedAt: "2026-03-16T18:01:00-07:00",
+      },
       sections: [
         {
           id: "section-last-1",
@@ -237,6 +314,7 @@ export const seedDemoState: DemoState = {
       summary: "Board version includes placement notes and edit requests.",
       status: "draft",
       sourceNewsletterId: "newsletter-parent-last",
+      delivery: {},
       sections: [
         {
           id: "section-board-1",
@@ -283,6 +361,7 @@ export const seedDemoState: DemoState = {
       summary: "Teacher version ready for Thursday release.",
       status: "draft",
       sourceNewsletterId: "newsletter-board-draft",
+      delivery: {},
       sections: [
         {
           id: "section-teachers-1",
@@ -307,6 +386,7 @@ export const seedDemoState: DemoState = {
       summary: "Parent version queued for Sunday scheduling.",
       status: "draft",
       sourceNewsletterId: "newsletter-board-draft",
+      delivery: {},
       sections: [
         {
           id: "section-parent-1",
@@ -352,6 +432,18 @@ export const seedDemoState: DemoState = {
       requiresHumanApproval: true,
       createdAt: "2026-03-23T07:45:00-07:00",
       updatedAt: "2026-03-23T08:02:00-07:00",
+      executionStatus: "completed",
+      steps: [
+        {
+          id: "approval-monday-send",
+          label: "Send reminder email",
+          type: "gmail_send",
+          status: "completed",
+          startedAt: "2026-03-23T08:01:00-07:00",
+          completedAt: "2026-03-23T08:02:00-07:00",
+          note: "Reminder sent to PTA member recipients.",
+        },
+      ],
     },
     {
       id: "approval-wednesday",
@@ -367,6 +459,15 @@ export const seedDemoState: DemoState = {
       requiresHumanApproval: true,
       createdAt: "2026-03-24T10:30:00-07:00",
       updatedAt: "2026-03-24T10:30:00-07:00",
+      executionStatus: "not_started",
+      steps: [
+        {
+          id: "approval-wednesday-send",
+          label: "Send board review email",
+          type: "gmail_send",
+          status: "pending",
+        },
+      ],
     },
     {
       id: "approval-thursday",
@@ -382,6 +483,21 @@ export const seedDemoState: DemoState = {
       requiresHumanApproval: true,
       createdAt: "2026-03-24T10:31:00-07:00",
       updatedAt: "2026-03-24T10:31:00-07:00",
+      executionStatus: "not_started",
+      steps: [
+        {
+          id: "approval-thursday-publish",
+          label: "Publish teacher newsletter",
+          type: "publish",
+          status: "pending",
+        },
+        {
+          id: "approval-thursday-send",
+          label: "Email Principal and Teacher Rep",
+          type: "gmail_send",
+          status: "pending",
+        },
+      ],
     },
     {
       id: "approval-sunday",
@@ -398,6 +514,33 @@ export const seedDemoState: DemoState = {
       requiresHumanApproval: true,
       createdAt: "2026-03-24T10:32:00-07:00",
       updatedAt: "2026-03-24T10:32:00-07:00",
+      executionStatus: "not_started",
+      steps: [
+        {
+          id: "approval-sunday-break-check",
+          label: "Check school-break skip logic",
+          type: "break_check",
+          status: "pending",
+        },
+        {
+          id: "approval-sunday-derive",
+          label: "Derive parent version from teacher-approved newsletter",
+          type: "derive_parent",
+          status: "pending",
+        },
+        {
+          id: "approval-sunday-duplicate",
+          label: "Duplicate parent newsletter in Membership Toolkit",
+          type: "duplicate",
+          status: "pending",
+        },
+        {
+          id: "approval-sunday-schedule",
+          label: "Schedule Sunday send",
+          type: "schedule",
+          status: "pending",
+        },
+      ],
     },
   ],
   auditLog: [

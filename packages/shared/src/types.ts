@@ -14,11 +14,15 @@ export type WorkflowStage =
   | "thursday_teacher_release"
   | "sunday_parent_schedule";
 
-export type MessageSource = "gmail" | "whatsapp" | "imessage";
+export type MessageSource = "gmail" | "whatsapp" | "imessage" | "artifact";
 
 export type AudienceVersion = "board" | "teachers" | "parents";
 
 export type ContentPriority = "urgent" | "time_sensitive" | "evergreen";
+
+export type InboxArtifactType =
+  | "previous_newsletter_link"
+  | "calendar_screenshot";
 
 export type ApprovalActionType =
   | "send_reminder_email"
@@ -28,10 +32,42 @@ export type ApprovalActionType =
 
 export type ApprovalStatus = "pending" | "approved" | "rejected";
 
+export type ApprovalExecutionStatus =
+  | "not_started"
+  | "running"
+  | "completed"
+  | "failed"
+  | "needs_operator"
+  | "skipped";
+
+export type ApprovalExecutionStepStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "needs_operator"
+  | "skipped";
+
+export type ApprovalExecutionStepType =
+  | "gmail_draft"
+  | "gmail_send"
+  | "publish"
+  | "duplicate"
+  | "schedule"
+  | "break_check"
+  | "derive_parent"
+  | "operator";
+
 export interface Contact {
   id: string;
   name: string;
   role: string;
+  email: string;
+}
+
+export interface MemberRecipient {
+  id: string;
+  name: string;
   email: string;
 }
 
@@ -59,6 +95,7 @@ export interface IntegrationConfig {
 export interface SetupState {
   auth0AccountEmail?: string;
   contacts: Contact[];
+  memberRecipients: MemberRecipient[];
   schoolBreaks: SchoolBreak[];
   integrations: {
     auth0: IntegrationConfig;
@@ -104,6 +141,20 @@ export interface ExtractedContentItem {
   recommendedAsFlyer: boolean;
 }
 
+export interface InboxArtifact {
+  id: string;
+  type: InboxArtifactType;
+  label: string;
+  createdAt: string;
+  source: "manual" | "live";
+  fileName?: string;
+  mimeType?: string;
+  originalUrl?: string;
+  storedPath?: string;
+  extractedText?: string;
+  note?: string;
+}
+
 export interface NewsletterItem {
   id: string;
   title: string;
@@ -126,6 +177,12 @@ export interface NewsletterSection {
   items: NewsletterItem[];
 }
 
+export interface NewsletterDeliveryMeta {
+  externalId?: string;
+  directUrl?: string;
+  lastSyncedAt?: string;
+}
+
 export interface NewsletterDraft {
   id: string;
   audience: AudienceVersion;
@@ -136,6 +193,7 @@ export interface NewsletterDraft {
   scheduledFor?: string;
   publishedAt?: string;
   sourceNewsletterId?: string;
+  delivery?: NewsletterDeliveryMeta;
 }
 
 export interface FlyerRecommendation {
@@ -161,6 +219,8 @@ export interface ApprovalAction {
   requiresHumanApproval: true;
   createdAt: string;
   updatedAt: string;
+  executionStatus: ApprovalExecutionStatus;
+  steps: ApprovalExecutionStep[];
   gmailExecution?: {
     deliveryPath: "mock" | "token_vault" | "identity_provider";
     lastAction: "draft_saved" | "sent";
@@ -171,6 +231,19 @@ export interface ApprovalAction {
     note?: string;
     updatedAt: string;
   };
+}
+
+export interface ApprovalExecutionStep {
+  id: string;
+  label: string;
+  type: ApprovalExecutionStepType;
+  status: ApprovalExecutionStepStatus;
+  startedAt?: string;
+  completedAt?: string;
+  note?: string;
+  errorMessage?: string;
+  externalUrl?: string;
+  outputs?: Record<string, string>;
 }
 
 export interface AuditEntry {
@@ -196,7 +269,9 @@ export interface PlannerUpdateInput {
 export interface InboxState {
   gmailThreads: GmailThread[];
   mockMessages: MockMessage[];
+  artifacts: InboxArtifact[];
   extractedItems: ExtractedContentItem[];
+  unplacedSuggestions: ExtractedContentItem[];
 }
 
 export interface DemoState {
@@ -219,6 +294,7 @@ export interface DemoState {
 export interface SetupUpdateInput {
   auth0AccountEmail?: string;
   contacts?: Contact[];
+  memberRecipients?: MemberRecipient[];
   schoolBreaks?: SchoolBreak[];
   integrations?: Partial<SetupState["integrations"]>;
   planner?: PlannerUpdateInput;
@@ -234,4 +310,16 @@ export interface AddMockMessageInput {
 export interface ApprovalEditInput {
   subject: string;
   body: string;
+}
+
+export interface ApprovalStepManualCompleteInput {
+  note?: string;
+  outputs?: Record<string, string>;
+}
+
+export interface InboxArtifactUploadInput {
+  type: InboxArtifactType;
+  label?: string;
+  originalUrl?: string;
+  note?: string;
 }

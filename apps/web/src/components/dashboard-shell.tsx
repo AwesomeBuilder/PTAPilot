@@ -2,6 +2,21 @@
 "use client";
 
 import {
+  closestCenter,
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
   startTransition,
   useCallback,
   useEffect,
@@ -22,21 +37,31 @@ import {
   ClockCountdown,
   EnvelopeSimple,
   GearSix,
+  LinkSimple,
   ListChecks,
   NotePencil,
   ShieldCheck,
   Trash,
+  UploadSimple,
 } from "@phosphor-icons/react";
 import type {
   AddMockMessageInput,
   ApprovalAction,
   ApprovalEditInput,
+  ApprovalExecutionStatus,
+  ApprovalExecutionStep,
+  ApprovalStepManualCompleteInput,
   AudienceVersion,
   Contact,
   DemoState,
+  ExtractedContentItem,
   IntegrationConfig,
   IntegrationMode,
   IntegrationStatus,
+  MemberRecipient,
+  NewsletterDraft,
+  NewsletterItem,
+  NewsletterSection,
   SchoolBreak,
   SetupUpdateInput,
   WorkflowStage,
@@ -87,6 +112,26 @@ type BadgeVariant =
 
 type ApprovalDraftMap = Record<string, ApprovalEditInput>;
 
+type EditableAudience = Extract<AudienceVersion, "board" | "teachers">;
+
+type NewsletterDraftMap = Record<EditableAudience, NewsletterDraft>;
+
+type ManualStepDraft = ApprovalStepManualCompleteInput & {
+  directUrl?: string;
+  externalId?: string;
+  scheduledFor?: string;
+};
+
+type ManualStepDraftMap = Record<string, ManualStepDraft>;
+
+type ArtifactDraftState = {
+  previousNewsletterUrl: string;
+  previousNewsletterNote: string;
+  calendarLabel: string;
+  calendarNote: string;
+  calendarFile: File | null;
+};
+
 type AuthStatusResponse = {
   tokenVault: {
     configured: boolean;
@@ -116,6 +161,7 @@ type AuthStatusResponse = {
 type SetupDraft = {
   auth0AccountEmail: string;
   contacts: Contact[];
+  memberRecipients: MemberRecipient[];
   schoolBreaks: SchoolBreak[];
   integrations: DemoState["setup"]["integrations"];
   planner: NonNullable<SetupUpdateInput["planner"]>;
@@ -156,6 +202,7 @@ function createSetupDraft(state: DemoState): SetupDraft {
   return {
     auth0AccountEmail: state.setup.auth0AccountEmail ?? "",
     contacts: structuredClone(state.setup.contacts),
+    memberRecipients: structuredClone(state.setup.memberRecipients),
     schoolBreaks: structuredClone(state.setup.schoolBreaks),
     integrations: structuredClone(state.setup.integrations),
     planner: {
@@ -175,6 +222,100 @@ function createApprovalDrafts(approvals: ApprovalAction[]) {
       } satisfies ApprovalEditInput,
     ]),
   ) as ApprovalDraftMap;
+}
+
+function createNewsletterDrafts(state: DemoState): NewsletterDraftMap {
+  return {
+    board: structuredClone(state.newsletters.board),
+    teachers: structuredClone(state.newsletters.teachers),
+  };
+}
+
+function stepDraftKey(actionId: string, stepId: string) {
+  return `${actionId}:${stepId}`;
+}
+
+function getApprovalSteps(
+  approval: Pick<ApprovalAction, "steps"> | { steps?: ApprovalExecutionStep[] },
+) {
+  return Array.isArray(approval.steps) ? approval.steps : [];
+}
+
+function deriveApprovalExecutionStatus(
+  approval:
+    | Pick<ApprovalAction, "executionStatus" | "steps">
+    | {
+        executionStatus?: ApprovalExecutionStatus;
+        steps?: ApprovalExecutionStep[];
+      },
+): ApprovalExecutionStatus {
+  if (approval.executionStatus) {
+    return approval.executionStatus;
+  }
+
+  const steps = getApprovalSteps(approval);
+
+  if (!steps.length || steps.every((step) => step.status === "pending")) {
+    return "not_started";
+  }
+
+  if (steps.some((step) => step.status === "running")) {
+    return "running";
+  }
+
+  if (steps.some((step) => step.status === "failed")) {
+    return "failed";
+  }
+
+  if (steps.some((step) => step.status === "needs_operator")) {
+    return "needs_operator";
+  }
+
+  if (steps.every((step) => step.status === "completed")) {
+    return "completed";
+  }
+
+  if (
+    steps.every((step) => ["completed", "skipped"].includes(step.status)) &&
+    steps.some((step) => step.status === "skipped")
+  ) {
+    return "skipped";
+  }
+
+  return "running";
+}
+
+function createManualStepDrafts(approvals: ApprovalAction[]) {
+  return Object.fromEntries(
+    approvals.flatMap((approval) =>
+      getApprovalSteps(approval).map((step) => [
+        stepDraftKey(approval.id, step.id),
+        {
+          note: step.note ?? "",
+          directUrl: step.outputs?.directUrl ?? "",
+          externalId: step.outputs?.externalId ?? "",
+          scheduledFor: step.outputs?.scheduledFor ?? "",
+        } satisfies ManualStepDraft,
+      ]),
+    ),
+  ) as ManualStepDraftMap;
+}
+
+function createArtifactDrafts(state: DemoState): ArtifactDraftState {
+  const latestPreviousLink = state.inbox.artifacts.find(
+    (artifact) => artifact.type === "previous_newsletter_link",
+  );
+
+  return {
+    previousNewsletterUrl:
+      latestPreviousLink?.originalUrl ??
+      state.newsletters.lastPublishedParent.delivery?.directUrl ??
+      "",
+    previousNewsletterNote: latestPreviousLink?.note ?? "",
+    calendarLabel: "Calendar screenshot",
+    calendarNote: "",
+    calendarFile: null,
+  };
 }
 
 const DISPLAY_VALUE_LABELS: Record<string, string> = {
@@ -206,8 +347,10 @@ function formatDisplayLabel(value: string) {
 
   const compact = normalized.replace(/\s+/g, "").toLowerCase();
 
-  if (compact in DISPLAY_VALUE_LABELS) {
-    return DISPLAY_VALUE_LABELS[compact];
+  const directLabel = DISPLAY_VALUE_LABELS[compact];
+
+  if (directLabel) {
+    return directLabel;
   }
 
   return normalized
@@ -304,6 +447,7 @@ function createSetupPayload(setupDraft: SetupDraft): SetupUpdateInput {
   return {
     auth0AccountEmail: setupDraft.auth0AccountEmail.trim(),
     contacts: setupDraft.contacts,
+    memberRecipients: setupDraft.memberRecipients,
     schoolBreaks: setupDraft.schoolBreaks,
     integrations: setupDraft.integrations,
     planner: setupDraft.planner,
@@ -314,7 +458,7 @@ function getStatusTone(status: string) {
   const normalized = status.toLowerCase();
 
   if (
-    ["approved", "connected", "done", "published"].includes(normalized)
+    ["approved", "connected", "done", "published", "completed", "scheduled"].includes(normalized)
   ) {
     return {
       container:
@@ -330,10 +474,17 @@ function getStatusTone(status: string) {
     };
   }
 
-  if (["needs_setup", "rejected"].includes(normalized)) {
+  if (["needs_setup", "rejected", "failed"].includes(normalized)) {
     return {
       container: "border-rose-400/20 bg-rose-400/10 text-rose-100",
       dot: "bg-rose-300",
+    };
+  }
+
+  if (["running", "pending", "not_started", "needs_operator", "skipped"].includes(normalized)) {
+    return {
+      container: "border-amber-300/20 bg-amber-400/10 text-amber-100",
+      dot: "bg-amber-300",
     };
   }
 
@@ -348,11 +499,12 @@ function StatusIndicator({
   label,
   className,
 }: {
-  status: string;
+  status?: string | null;
   label?: string;
   className?: string;
 }) {
-  const tone = getStatusTone(status);
+  const normalizedStatus = status?.trim() ? status : "unknown";
+  const tone = getStatusTone(normalizedStatus);
 
   return (
     <span
@@ -363,7 +515,7 @@ function StatusIndicator({
       )}
     >
       <span className={cn("size-1.5 rounded-full", tone.dot)} />
-      <span>{label ?? formatDisplayLabel(status)}</span>
+      <span>{label ?? formatDisplayLabel(normalizedStatus)}</span>
     </span>
   );
 }
@@ -412,6 +564,10 @@ function withUserQuery(path: string, userId?: string | null) {
 
   const separator = path.includes("?") ? "&" : "?";
   return `${path}${separator}userId=${encodeURIComponent(userId)}`;
+}
+
+function getSuggestionKey(item: Pick<ExtractedContentItem, "title" | "summary">) {
+  return `${item.title}::${item.summary}`;
 }
 
 function getAuth0IntegrationDisplayStatus(
@@ -471,8 +627,14 @@ export function DashboardShell({
   const [setupDraft, setSetupDraft] = useState<SetupDraft>(
     createSetupDraft(seedDemoState),
   );
+  const [newsletterDrafts, setNewsletterDrafts] = useState<NewsletterDraftMap>(
+    createNewsletterDrafts(seedDemoState),
+  );
   const [approvalDrafts, setApprovalDrafts] = useState<ApprovalDraftMap>(
     createApprovalDrafts(seedDemoState.approvals),
+  );
+  const [manualStepDrafts, setManualStepDrafts] = useState<ManualStepDraftMap>(
+    createManualStepDrafts(seedDemoState.approvals),
   );
   const [authStatus, setAuthStatus] = useState<AuthStatusResponse | null>(null);
   const [authStatusError, setAuthStatusError] = useState<string | null>(null);
@@ -487,6 +649,10 @@ export function DashboardShell({
     role: "",
     email: "",
   });
+  const [newMemberRecipient, setNewMemberRecipient] = useState({
+    name: "",
+    email: "",
+  });
   const [newBreak, setNewBreak] = useState({
     name: "",
     startsOn: "",
@@ -499,6 +665,9 @@ export function DashboardShell({
     body: "",
     imageUrl: "",
   });
+  const [artifactDrafts, setArtifactDrafts] = useState<ArtifactDraftState>(
+    createArtifactDrafts(seedDemoState),
+  );
 
   const refreshSnapshot = useCallback(async () => {
     try {
@@ -527,7 +696,10 @@ export function DashboardShell({
 
   useEffect(() => {
     setSetupDraft(createSetupDraft(snapshot));
+    setNewsletterDrafts(createNewsletterDrafts(snapshot));
     setApprovalDrafts(createApprovalDrafts(snapshot.approvals));
+    setManualStepDrafts(createManualStepDrafts(snapshot.approvals));
+    setArtifactDrafts(createArtifactDrafts(snapshot));
   }, [snapshot]);
 
   const refreshAuthStatus = useCallback(async () => {
@@ -577,10 +749,12 @@ export function DashboardShell({
   function selectView(nextView: ViewKey) {
     setActiveView(nextView);
     requestAnimationFrame(() => {
-      mainRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
-      });
+      if (typeof mainRef.current?.scrollIntoView === "function") {
+        mainRef.current.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }
     });
   }
 
@@ -642,6 +816,218 @@ export function DashboardShell({
           method: "POST",
         }),
       "Duplicated last newsletter into this week's working drafts.",
+    );
+  }
+
+  function updateNewsletterDraftState(
+    audience: EditableAudience,
+    updater: (draft: NewsletterDraft) => NewsletterDraft,
+  ) {
+    setNewsletterDrafts((current) => ({
+      ...current,
+      [audience]: updater(current[audience]),
+    }));
+  }
+
+  function updateNewsletterDraftField(
+    audience: EditableAudience,
+    field: "title" | "summary",
+    value: string,
+  ) {
+    updateNewsletterDraftState(audience, (draft) => ({
+      ...draft,
+      [field]: value,
+    }));
+  }
+
+  function updateSectionTitle(
+    audience: EditableAudience,
+    sectionId: string,
+    value: string,
+  ) {
+    updateNewsletterDraftState(audience, (draft) => ({
+      ...draft,
+      sections: draft.sections.map((section) =>
+        section.id === sectionId ? { ...section, title: value } : section,
+      ),
+    }));
+  }
+
+  function updateItemField(
+    audience: EditableAudience,
+    sectionId: string,
+    itemId: string,
+    field: "title" | "body",
+    value: string,
+  ) {
+    updateNewsletterDraftState(audience, (draft) => ({
+      ...draft,
+      sections: draft.sections.map((section) =>
+        section.id === sectionId
+          ? {
+              ...section,
+              items: section.items.map((item) =>
+                item.id === itemId ? { ...item, [field]: value } : item,
+              ),
+            }
+          : section,
+      ),
+    }));
+  }
+
+  function reorderSections(
+    audience: EditableAudience,
+    event: DragEndEvent,
+  ) {
+    const { active, over } = event;
+
+    if (!over || active.id === over.id) {
+      return;
+    }
+
+    updateNewsletterDraftState(audience, (draft) => {
+      const oldIndex = draft.sections.findIndex((section) => section.id === active.id);
+      const newIndex = draft.sections.findIndex((section) => section.id === over.id);
+
+      if (oldIndex === -1 || newIndex === -1) {
+        return draft;
+      }
+
+      return {
+        ...draft,
+        sections: arrayMove(draft.sections, oldIndex, newIndex),
+      };
+    });
+  }
+
+  function reorderItems(
+    audience: EditableAudience,
+    sectionId: string,
+    event: DragEndEvent,
+  ) {
+    const { active, over } = event;
+
+    if (!over || active.id === over.id) {
+      return;
+    }
+
+    updateNewsletterDraftState(audience, (draft) => ({
+      ...draft,
+      sections: draft.sections.map((section) => {
+        if (section.id !== sectionId) {
+          return section;
+        }
+
+        const oldIndex = section.items.findIndex((item) => item.id === active.id);
+        const newIndex = section.items.findIndex((item) => item.id === over.id);
+
+        if (oldIndex === -1 || newIndex === -1) {
+          return section;
+        }
+
+        return {
+          ...section,
+          items: arrayMove(section.items, oldIndex, newIndex),
+        };
+      }),
+    }));
+  }
+
+  function placeSuggestion(audience: EditableAudience, suggestion: ExtractedContentItem) {
+    updateNewsletterDraftState(audience, (draft) => {
+      const preferredKind =
+        suggestion.priority === "urgent" ? "urgent_schoolwide" : "events";
+      const nextSections = structuredClone(draft.sections);
+      const item: NewsletterItem = {
+        id: `${audience}-${suggestion.id}-${crypto.randomUUID()}`,
+        title: suggestion.title,
+        body: suggestion.summary,
+        priority: suggestion.priority,
+        sourceBadges: [formatDisplayLabel(suggestion.source), suggestion.sourceRef],
+        flyerRecommended: suggestion.recommendedAsFlyer,
+      };
+
+      const existingSection = nextSections.find(
+        (section) => section.kind === preferredKind,
+      );
+
+      if (existingSection) {
+        existingSection.items.push(item);
+      } else {
+        nextSections.push({
+          id: `${audience}-section-${crypto.randomUUID()}`,
+          title:
+            suggestion.priority === "urgent"
+              ? "Urgent schoolwide items"
+              : "Events and reminders",
+          kind: preferredKind,
+          items: [item],
+        } satisfies NewsletterSection);
+      }
+
+      return {
+        ...draft,
+        sections: nextSections,
+      };
+    });
+  }
+
+  async function saveNewsletterDraft(audience: EditableAudience) {
+    await runMutation(
+      `Saving ${audience} newsletter draft`,
+      () =>
+        fetchJson<DemoState>(`/api/newsletter/${audience}`, {
+          method: "PUT",
+          body: JSON.stringify(newsletterDrafts[audience]),
+        }),
+      `${formatDisplayLabel(audience)} draft saved.`,
+    );
+  }
+
+  async function savePreviousNewsletterLink() {
+    const formData = new FormData();
+    formData.append("type", "previous_newsletter_link");
+    formData.append("originalUrl", artifactDrafts.previousNewsletterUrl);
+    if (artifactDrafts.previousNewsletterNote.trim()) {
+      formData.append("note", artifactDrafts.previousNewsletterNote.trim());
+    }
+
+    await runMutation(
+      "Saving previous newsletter link",
+      () =>
+        fetchJson<DemoState>("/api/inbox/artifacts", {
+          method: "POST",
+          body: formData,
+        }),
+      "Previous newsletter link saved.",
+    );
+  }
+
+  async function uploadCalendarScreenshot() {
+    if (!artifactDrafts.calendarFile) {
+      setNotice({
+        tone: "error",
+        message: "Choose a calendar screenshot before uploading it for OCR.",
+      });
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("type", "calendar_screenshot");
+    formData.append("label", artifactDrafts.calendarLabel);
+    if (artifactDrafts.calendarNote.trim()) {
+      formData.append("note", artifactDrafts.calendarNote.trim());
+    }
+    formData.append("file", artifactDrafts.calendarFile);
+
+    await runMutation(
+      "Uploading calendar screenshot for OCR",
+      () =>
+        fetchJson<DemoState>("/api/inbox/artifacts", {
+          method: "POST",
+          body: formData,
+        }),
+      "Calendar screenshot uploaded and queued into OCR-backed inbox artifacts.",
     );
   }
 
@@ -711,6 +1097,65 @@ export function DashboardShell({
     );
   }
 
+  async function retryActionExecution(actionId: string) {
+    await runMutation(
+      "Retrying action execution",
+      () =>
+        fetchJson<DemoState>(
+          withUserQuery(`/api/actions/${actionId}/retry`, user?.sub),
+          {
+            method: "POST",
+          },
+        ),
+      "Action execution retry requested.",
+    );
+  }
+
+  function updateManualStepDraft(
+    actionId: string,
+    stepId: string,
+    field: keyof ManualStepDraft,
+    value: string,
+  ) {
+    setManualStepDrafts((current) => ({
+      ...current,
+      [stepDraftKey(actionId, stepId)]: {
+        ...(current[stepDraftKey(actionId, stepId)] ?? {}),
+        [field]: value,
+      },
+    }));
+  }
+
+  async function completeManualStep(actionId: string, stepId: string) {
+    const draft = manualStepDrafts[stepDraftKey(actionId, stepId)] ?? {};
+    const outputs = Object.fromEntries(
+      Object.entries({
+        directUrl: draft.directUrl?.trim(),
+        externalId: draft.externalId?.trim(),
+        scheduledFor: draft.scheduledFor?.trim(),
+      }).filter(([, value]) => Boolean(value)),
+    );
+
+    await runMutation(
+      "Saving manual execution details",
+      () =>
+        fetchJson<DemoState>(
+          withUserQuery(
+            `/api/actions/${actionId}/steps/${stepId}/manual-complete`,
+            user?.sub,
+          ),
+          {
+            method: "POST",
+            body: JSON.stringify({
+              note: draft.note?.trim() || undefined,
+              outputs: Object.keys(outputs).length ? outputs : undefined,
+            }),
+          },
+        ),
+      "Manual step marked complete.",
+    );
+  }
+
   function updateIntegrationMode(
     key: keyof SetupDraft["integrations"],
     mode: IntegrationMode,
@@ -743,6 +1188,24 @@ export function DashboardShell({
       ],
     }));
     setNewContact({ name: "", role: "", email: "" });
+  }
+
+  function addMemberRecipientToDraft() {
+    if (!newMemberRecipient.name || !newMemberRecipient.email) {
+      return;
+    }
+
+    setSetupDraft((current) => ({
+      ...current,
+      memberRecipients: [
+        ...current.memberRecipients,
+        {
+          id: `member-${crypto.randomUUID()}`,
+          ...newMemberRecipient,
+        },
+      ],
+    }));
+    setNewMemberRecipient({ name: "", email: "" });
   }
 
   function addBreakToDraft() {
@@ -789,6 +1252,33 @@ export function DashboardShell({
     setSetupDraft((current) => ({
       ...current,
       contacts: current.contacts.filter((contact) => contact.id !== contactId),
+    }));
+  }
+
+  function updateMemberRecipientField(
+    recipientId: string,
+    field: keyof Omit<MemberRecipient, "id">,
+    value: string,
+  ) {
+    setSetupDraft((current) => ({
+      ...current,
+      memberRecipients: current.memberRecipients.map((recipient) =>
+        recipient.id === recipientId
+          ? {
+              ...recipient,
+              [field]: value,
+            }
+          : recipient,
+      ),
+    }));
+  }
+
+  function removeMemberRecipient(recipientId: string) {
+    setSetupDraft((current) => ({
+      ...current,
+      memberRecipients: current.memberRecipients.filter(
+        (recipient) => recipient.id !== recipientId,
+      ),
     }));
   }
 
@@ -1055,17 +1545,22 @@ export function DashboardShell({
                 }
                 onIntegrationModeChange={updateIntegrationMode}
                 onAddContact={addContactToDraft}
+                onAddMemberRecipient={addMemberRecipientToDraft}
                 onAddBreak={addBreakToDraft}
                 onUpdateContact={updateContactField}
+                onUpdateMemberRecipient={updateMemberRecipientField}
                 onRemoveContact={removeContact}
+                onRemoveMemberRecipient={removeMemberRecipient}
                 onUpdateBreak={updateBreakField}
                 onRemoveBreak={removeBreak}
                 onSetCurrentWorkflowStage={setCurrentWorkflowStage}
                 onUpdateWorkflowTargetTime={updateWorkflowTargetTime}
                 onOpenWorkflowStage={openWorkflowStage}
                 newContact={newContact}
+                newMemberRecipient={newMemberRecipient}
                 newBreak={newBreak}
                 setNewContact={setNewContact}
+                setNewMemberRecipient={setNewMemberRecipient}
                 setNewBreak={setNewBreak}
                 onSave={() => void saveSetupDraft()}
                 hasUnsavedChanges={hasUnsavedSetupChanges}
@@ -1078,9 +1573,13 @@ export function DashboardShell({
               <InboxView
                 state={snapshot}
                 mockMessageDraft={mockMessageDraft}
+                artifactDrafts={artifactDrafts}
                 setMockMessageDraft={setMockMessageDraft}
+                setArtifactDrafts={setArtifactDrafts}
                 onIngest={() => void ingestUpdates()}
                 onSubmitMockMessage={() => void submitMockMessage()}
+                onSavePreviousNewsletterLink={() => void savePreviousNewsletterLink()}
+                onUploadCalendarScreenshot={() => void uploadCalendarScreenshot()}
                 isMutating={isMutating}
               />
             </TabsContent>
@@ -1088,7 +1587,15 @@ export function DashboardShell({
             <TabsContent value="newsletter">
               <NewsletterView
                 state={snapshot}
+                newsletterDrafts={newsletterDrafts}
                 onDuplicate={() => void duplicateNewsletter()}
+                onUpdateDraftField={updateNewsletterDraftField}
+                onUpdateSectionTitle={updateSectionTitle}
+                onUpdateItemField={updateItemField}
+                onSectionDragEnd={reorderSections}
+                onItemDragEnd={reorderItems}
+                onPlaceSuggestion={placeSuggestion}
+                onSaveDraft={saveNewsletterDraft}
                 isMutating={isMutating}
               />
             </TabsContent>
@@ -1097,6 +1604,7 @@ export function DashboardShell({
               <ActionsView
                 state={snapshot}
                 approvalDrafts={approvalDrafts}
+                manualStepDrafts={manualStepDrafts}
                 onDraftChange={(actionId, field, value) =>
                   setApprovalDrafts((current) => ({
                     ...current,
@@ -1112,6 +1620,9 @@ export function DashboardShell({
                 onSave={saveApproval}
                 onApprove={approveAction}
                 onReject={rejectAction}
+                onRetry={retryActionExecution}
+                onManualStepDraftChange={updateManualStepDraft}
+                onCompleteManualStep={completeManualStep}
                 isMutating={isMutating}
               />
             </TabsContent>
@@ -1200,17 +1711,22 @@ function SetupView({
   onAuth0EmailChange,
   onIntegrationModeChange,
   onAddContact,
+  onAddMemberRecipient,
   onAddBreak,
   onUpdateContact,
+  onUpdateMemberRecipient,
   onRemoveContact,
+  onRemoveMemberRecipient,
   onUpdateBreak,
   onRemoveBreak,
   onSetCurrentWorkflowStage,
   onUpdateWorkflowTargetTime,
   onOpenWorkflowStage,
   newContact,
+  newMemberRecipient,
   newBreak,
   setNewContact,
+  setNewMemberRecipient,
   setNewBreak,
   onSave,
   hasUnsavedChanges,
@@ -1231,13 +1747,20 @@ function SetupView({
     mode: IntegrationMode,
   ) => void;
   onAddContact: () => void;
+  onAddMemberRecipient: () => void;
   onAddBreak: () => void;
   onUpdateContact: (
     contactId: string,
     field: keyof Omit<Contact, "id">,
     value: string,
   ) => void;
+  onUpdateMemberRecipient: (
+    recipientId: string,
+    field: keyof Omit<MemberRecipient, "id">,
+    value: string,
+  ) => void;
   onRemoveContact: (contactId: string) => void;
+  onRemoveMemberRecipient: (recipientId: string) => void;
   onUpdateBreak: (
     breakId: string,
     field: keyof Omit<SchoolBreak, "id">,
@@ -1248,9 +1771,13 @@ function SetupView({
   onUpdateWorkflowTargetTime: (stage: WorkflowStage, value: string) => void;
   onOpenWorkflowStage: (stage: WorkflowStage) => void;
   newContact: { name: string; role: string; email: string };
+  newMemberRecipient: { name: string; email: string };
   newBreak: { name: string; startsOn: string; endsOn: string };
   setNewContact: Dispatch<
     SetStateAction<{ name: string; role: string; email: string }>
+  >;
+  setNewMemberRecipient: Dispatch<
+    SetStateAction<{ name: string; email: string }>
   >;
   setNewBreak: Dispatch<
     SetStateAction<{ name: string; startsOn: string; endsOn: string }>
@@ -1444,11 +1971,20 @@ function SetupView({
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
             <div className="rounded-[1.7rem] border border-border/80 bg-background/75 p-5">
               <p className="text-xs font-semibold tracking-[0.22em] text-muted-foreground uppercase">
-                Recipients
+                Board / staff
               </p>
               <p className="mt-3 text-3xl font-semibold">{setupDraft.contacts.length}</p>
               <p className="mt-2 text-sm text-muted-foreground">
-                Editable recurring contacts for reviewers, staff, and PTA leads.
+                Routing contacts for board review, staff release, and recurring approvals.
+              </p>
+            </div>
+            <div className="rounded-[1.7rem] border border-border/80 bg-background/75 p-5">
+              <p className="text-xs font-semibold tracking-[0.22em] text-muted-foreground uppercase">
+                PTA members
+              </p>
+              <p className="mt-3 text-3xl font-semibold">{setupDraft.memberRecipients.length}</p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Monday reminder recipients used for member-facing Gmail sends.
               </p>
             </div>
             <div className="rounded-[1.7rem] border border-border/80 bg-background/75 p-5">
@@ -1705,11 +2241,119 @@ function SetupView({
           <Card className="brand-panel">
             <CardHeader>
               <CardTitle className="flex items-center justify-between gap-3">
+                <span>PTA member recipients</span>
+                <Badge variant="outline">{setupDraft.memberRecipients.length}</Badge>
+              </CardTitle>
+              <CardDescription>
+                Maintain the live member send list used by the Monday reminder approval.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {setupDraft.memberRecipients.length ? (
+                <div className="space-y-3">
+                  {setupDraft.memberRecipients.map((recipient) => (
+                    <div
+                      key={recipient.id}
+                      className="rounded-[1.7rem] border border-border/80 bg-background/70 p-4"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium">
+                            {recipient.name || "Untitled member"}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Included in live Gmail reminder sends after approval.
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => onRemoveMemberRecipient(recipient.id)}
+                          aria-label={`Delete ${recipient.name || "member recipient"}`}
+                        >
+                          <Trash className="size-4" />
+                        </Button>
+                      </div>
+                      <div className="mt-4 grid gap-3 md:grid-cols-2">
+                        <Input
+                          placeholder="Name"
+                          value={recipient.name}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            onUpdateMemberRecipient(
+                              recipient.id,
+                              "name",
+                              event.target.value,
+                            )
+                          }
+                        />
+                        <Input
+                          placeholder="Email"
+                          type="email"
+                          value={recipient.email}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            onUpdateMemberRecipient(
+                              recipient.id,
+                              "email",
+                              event.target.value,
+                            )
+                          }
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-[1.7rem] border border-dashed border-border/80 bg-background/60 p-4 text-sm text-muted-foreground">
+                  No PTA member recipients yet. Add the live member email list here before approving the Monday reminder send.
+                </div>
+              )}
+
+              <div className="rounded-[1.7rem] border border-dashed border-primary/20 bg-primary/[0.06] p-4">
+                <p className="text-sm font-medium">Add member recipient</p>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <Input
+                    placeholder="Name"
+                    value={newMemberRecipient.name}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                      setNewMemberRecipient((current) => ({
+                        ...current,
+                        name: event.target.value,
+                      }))
+                    }
+                  />
+                  <Input
+                    placeholder="Email"
+                    type="email"
+                    value={newMemberRecipient.email}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                      setNewMemberRecipient((current) => ({
+                        ...current,
+                        email: event.target.value,
+                      }))
+                    }
+                  />
+                </div>
+                <Button
+                  className="mt-4"
+                  variant="outline"
+                  size="sm"
+                  onClick={onAddMemberRecipient}
+                >
+                  Add member recipient
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="brand-panel">
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between gap-3">
                 <span>Recurring contacts</span>
                 <Badge variant="outline">{setupDraft.contacts.length}</Badge>
               </CardTitle>
               <CardDescription>
-                Edit or remove reviewers inline, then add new contacts below.
+                Edit or remove board/staff routing contacts inline, then add new ones below.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1935,16 +2579,24 @@ function SetupView({
 function InboxView({
   state,
   mockMessageDraft,
+  artifactDrafts,
   setMockMessageDraft,
+  setArtifactDrafts,
   onIngest,
   onSubmitMockMessage,
+  onSavePreviousNewsletterLink,
+  onUploadCalendarScreenshot,
   isMutating,
 }: {
   state: DemoState;
   mockMessageDraft: AddMockMessageInput;
+  artifactDrafts: ArtifactDraftState;
   setMockMessageDraft: Dispatch<SetStateAction<AddMockMessageInput>>;
+  setArtifactDrafts: Dispatch<SetStateAction<ArtifactDraftState>>;
   onIngest: () => void;
   onSubmitMockMessage: () => void;
+  onSavePreviousNewsletterLink: () => void;
+  onUploadCalendarScreenshot: () => void;
   isMutating: boolean;
 }) {
   return (
@@ -2048,6 +2700,99 @@ function InboxView({
       <div className="space-y-4">
         <Card className="brand-panel">
           <CardHeader>
+            <CardTitle>Artifact ingestion</CardTitle>
+            <CardDescription>
+              Save the previous newsletter link and run OCR on a calendar screenshot.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="space-y-3">
+              <Label htmlFor="previous-newsletter-url">Previous newsletter URL</Label>
+              <Input
+                id="previous-newsletter-url"
+                value={artifactDrafts.previousNewsletterUrl}
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  setArtifactDrafts((current) => ({
+                    ...current,
+                    previousNewsletterUrl: event.target.value,
+                  }))
+                }
+                placeholder="https://..."
+              />
+              <Textarea
+                value={artifactDrafts.previousNewsletterNote}
+                onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
+                  setArtifactDrafts((current) => ({
+                    ...current,
+                    previousNewsletterNote: event.target.value,
+                  }))
+                }
+                placeholder="Optional note for reminder/email context"
+                className="min-h-24"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onSavePreviousNewsletterLink}
+                disabled={isMutating || !artifactDrafts.previousNewsletterUrl.trim()}
+              >
+                <LinkSimple className="size-4" />
+                Save link
+              </Button>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-3">
+              <Label htmlFor="calendar-screenshot-file">Calendar screenshot</Label>
+              <Input
+                id="calendar-screenshot-label"
+                value={artifactDrafts.calendarLabel}
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  setArtifactDrafts((current) => ({
+                    ...current,
+                    calendarLabel: event.target.value,
+                  }))
+                }
+                placeholder="Label"
+              />
+              <Input
+                id="calendar-screenshot-file"
+                type="file"
+                accept="image/*"
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  setArtifactDrafts((current) => ({
+                    ...current,
+                    calendarFile: event.target.files?.[0] ?? null,
+                  }))
+                }
+              />
+              <Textarea
+                value={artifactDrafts.calendarNote}
+                onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
+                  setArtifactDrafts((current) => ({
+                    ...current,
+                    calendarNote: event.target.value,
+                  }))
+                }
+                placeholder="Optional note for OCR context"
+                className="min-h-24"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onUploadCalendarScreenshot}
+                disabled={isMutating || !artifactDrafts.calendarFile}
+              >
+                <UploadSimple className="size-4" />
+                Upload for OCR
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="brand-panel">
+          <CardHeader>
             <CardTitle>Mock message composer</CardTitle>
             <CardDescription>
               Send yourself a WhatsApp or iMessage update for demo purposes.
@@ -2119,6 +2864,42 @@ function InboxView({
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            {state.inbox.artifacts.length ? (
+              <div className="space-y-3">
+                {state.inbox.artifacts.map((artifact) => (
+                  <div
+                    key={artifact.id}
+                    className="rounded-2xl border border-border/80 bg-background/75 p-4"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium">{artifact.label}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatDisplayLabel(artifact.type)} • {formatDateTime(artifact.createdAt)}
+                        </p>
+                      </div>
+                      <Badge variant="outline">Artifact</Badge>
+                    </div>
+                    {artifact.originalUrl ? (
+                      <a
+                        href={artifact.originalUrl}
+                        className="mt-2 block text-sm text-primary underline-offset-4 hover:underline"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {artifact.originalUrl}
+                      </a>
+                    ) : null}
+                    {artifact.extractedText ? (
+                      <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                        {artifact.extractedText}
+                      </p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
             {state.inbox.extractedItems.map((item) => (
               <div
                 key={item.id}
@@ -2149,111 +2930,454 @@ function InboxView({
   );
 }
 
+function SortableNewsletterItemCard({
+  item,
+  onChange,
+  canReorder,
+}: {
+  item: NewsletterItem;
+  onChange: (field: "title" | "body", value: string) => void;
+  canReorder: boolean;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: item.id });
+  const dragHandleProps = canReorder ? { ...attributes, ...listeners } : {};
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+      className={cn(
+        "rounded-2xl border border-border/70 bg-card p-4",
+        isDragging && "opacity-70",
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <Input
+            value={item.title}
+            onChange={(event: ChangeEvent<HTMLInputElement>) =>
+              onChange("title", event.target.value)
+            }
+          />
+          <Textarea
+            value={item.body}
+            onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
+              onChange("body", event.target.value)
+            }
+            className="mt-3 min-h-24"
+          />
+        </div>
+        <button
+          type="button"
+          aria-label={`Reorder item ${item.title}`}
+          title={
+            canReorder
+              ? "Drag to reorder this card"
+              : "Add another card to this section before reordering."
+          }
+          disabled={!canReorder}
+          className={cn(
+            "rounded-xl border border-border/80 bg-background/60 px-2 py-1 text-xs text-muted-foreground",
+            !canReorder && "cursor-not-allowed opacity-50",
+          )}
+          {...dragHandleProps}
+        >
+          Drag
+        </button>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <StatusIndicator status={item.priority} />
+        {item.sourceBadges.map((badge) => (
+          <Badge key={badge} variant="outline">
+            {formatDisplayLabel(badge)}
+          </Badge>
+        ))}
+        {item.flyerRecommended ? (
+          <Badge variant="secondary">Flyer recommended</Badge>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function SortableNewsletterSectionCard({
+  audience,
+  section,
+  canReorderSections,
+  onSectionTitleChange,
+  onItemFieldChange,
+  onItemDragEnd,
+}: {
+  audience: EditableAudience;
+  section: NewsletterSection;
+  canReorderSections: boolean;
+  onSectionTitleChange: (sectionId: string, value: string) => void;
+  onItemFieldChange: (
+    sectionId: string,
+    itemId: string,
+    field: "title" | "body",
+    value: string,
+  ) => void;
+  onItemDragEnd: (sectionId: string, event: DragEndEvent) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: section.id });
+  const sectionDragHandleProps = canReorderSections
+    ? { ...attributes, ...listeners }
+    : {};
+  const itemSensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 },
+    }),
+  );
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+      className={cn(
+        "rounded-2xl border border-border/80 bg-background/75 p-5",
+        isDragging && "opacity-70",
+      )}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <Input
+            value={section.title}
+            onChange={(event: ChangeEvent<HTMLInputElement>) =>
+              onSectionTitleChange(section.id, event.target.value)
+            }
+          />
+          <p className="mt-2 text-xs text-muted-foreground">
+            {formatDisplayLabel(section.kind)}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge variant="outline">{section.items.length} items</Badge>
+          <button
+            type="button"
+            aria-label={`Reorder section ${section.title}`}
+            title={
+              canReorderSections
+                ? "Drag to reorder this section"
+                : "Add another section to this draft before reordering."
+            }
+            disabled={!canReorderSections}
+            className={cn(
+              "rounded-xl border border-border/80 bg-background/60 px-2 py-1 text-xs text-muted-foreground",
+              !canReorderSections && "cursor-not-allowed opacity-50",
+            )}
+            {...sectionDragHandleProps}
+          >
+            Drag
+          </button>
+        </div>
+      </div>
+      <div className="mt-4">
+        <DndContext
+          sensors={itemSensors}
+          collisionDetection={closestCenter}
+          onDragEnd={(event) => onItemDragEnd(section.id, event)}
+        >
+          <SortableContext
+            items={section.items.map((item) => item.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            <div className="space-y-3">
+              {section.items.map((item) => (
+                <SortableNewsletterItemCard
+                  key={`${audience}-${section.id}-${item.id}`}
+                  item={item}
+                  canReorder={section.items.length > 1}
+                  onChange={(field, value) =>
+                    onItemFieldChange(section.id, item.id, field, value)
+                  }
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
+        {section.items.length < 2 ? (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Add another card to this section before reordering within it.
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function NewsletterView({
   state,
+  newsletterDrafts,
   onDuplicate,
+  onUpdateDraftField,
+  onUpdateSectionTitle,
+  onUpdateItemField,
+  onSectionDragEnd,
+  onItemDragEnd,
+  onPlaceSuggestion,
+  onSaveDraft,
   isMutating,
 }: {
   state: DemoState;
+  newsletterDrafts: NewsletterDraftMap;
   onDuplicate: () => void;
+  onUpdateDraftField: (
+    audience: EditableAudience,
+    field: "title" | "summary",
+    value: string,
+  ) => void;
+  onUpdateSectionTitle: (
+    audience: EditableAudience,
+    sectionId: string,
+    value: string,
+  ) => void;
+  onUpdateItemField: (
+    audience: EditableAudience,
+    sectionId: string,
+    itemId: string,
+    field: "title" | "body",
+    value: string,
+  ) => void;
+  onSectionDragEnd: (audience: EditableAudience, event: DragEndEvent) => void;
+  onItemDragEnd: (
+    audience: EditableAudience,
+    sectionId: string,
+    event: DragEndEvent,
+  ) => void;
+  onPlaceSuggestion: (audience: EditableAudience, suggestion: ExtractedContentItem) => void;
+  onSaveDraft: (audience: EditableAudience) => void;
   isMutating: boolean;
 }) {
+  const sectionSensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 },
+    }),
+  );
+  const locallyPlacedSuggestions = new Set(
+    Object.values(newsletterDrafts).flatMap((draft) =>
+      draft.sections.flatMap((section) =>
+        section.items.map((item) =>
+          getSuggestionKey({
+            title: item.title,
+            summary: item.body,
+          }),
+        ),
+      ),
+    ),
+  );
+  const visibleSuggestions = state.inbox.unplacedSuggestions.filter(
+    (item) => !locallyPlacedSuggestions.has(getSuggestionKey(item)),
+  );
+
   return (
     <div className="grid gap-4 2xl:grid-cols-[1.15fr_0.85fr]">
-      <Card className="brand-panel">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <NotePencil className="size-4" />
-            Newsletter editor
-          </CardTitle>
-          <CardDescription>
-            Fixed section ordering keeps urgent and time-sensitive content above
-            evergreen items.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={onDuplicate} disabled={isMutating}>
-              Duplicate last newsletter
-            </Button>
-            <Badge variant="outline">Audience: board</Badge>
-            <StatusIndicator status={state.newsletters.board.status} />
-          </div>
-          {state.newsletters.board.sections.map((section) => (
-            <div
-              key={section.id}
-              className="rounded-2xl border border-border/80 bg-background/75 p-5"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium">{section.title}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatDisplayLabel(section.kind)}
-                  </p>
-                </div>
-                <Badge variant="outline">{section.items.length} items</Badge>
-              </div>
-              <div className="mt-4 space-y-3">
-                {section.items.map((item) => (
-                  <div
-                    key={item.id}
-                    className="rounded-2xl border border-border/70 bg-card p-4"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-medium">{item.title}</p>
-                        <p className="mt-2 text-sm text-muted-foreground">
-                          {item.body}
-                        </p>
-                      </div>
-                      <StatusIndicator status={item.priority} />
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {item.sourceBadges.map((badge) => (
-                        <Badge key={badge} variant="outline">
-                          {formatDisplayLabel(badge)}
-                        </Badge>
-                      ))}
-                      {item.flyerRecommended ? (
-                        <Badge variant="secondary">Flyer recommended</Badge>
-                      ) : null}
-                    </div>
+      <div className="space-y-4">
+        {(["board", "teachers"] as const).map((audience) => {
+          const draft = newsletterDrafts[audience];
+          const baseline = state.newsletters[audience];
+          const hasUnsavedChanges =
+            JSON.stringify(draft) !== JSON.stringify(baseline);
+
+          return (
+            <Card key={audience} className="brand-panel">
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between gap-3">
+                  <span className="flex items-center gap-2">
+                    <NotePencil className="size-4" />
+                    {formatDisplayLabel(audience)} editor
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <StatusIndicator status={draft.status} />
+                    {draft.delivery?.directUrl ? (
+                      <Badge variant="outline">Direct link captured</Badge>
+                    ) : null}
                   </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+                </CardTitle>
+                <CardDescription>
+                  Inline editing and drag/drop reordering stay local until you save the draft.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-[1fr_1.2fr]">
+                  <Input
+                    value={draft.title}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                      onUpdateDraftField(audience, "title", event.target.value)
+                    }
+                  />
+                  <Textarea
+                    value={draft.summary}
+                    onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
+                      onUpdateDraftField(audience, "summary", event.target.value)
+                    }
+                    className="min-h-24"
+                  />
+                </div>
+
+                <DndContext
+                  sensors={sectionSensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={(event) => onSectionDragEnd(audience, event)}
+                >
+                  <SortableContext
+                    items={draft.sections.map((section) => section.id)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <div className="space-y-4">
+                      {draft.sections.map((section) => (
+                        <SortableNewsletterSectionCard
+                          key={`${audience}-${section.id}`}
+                          audience={audience}
+                          section={section}
+                          canReorderSections={draft.sections.length > 1}
+                          onSectionTitleChange={(sectionId, value) =>
+                            onUpdateSectionTitle(audience, sectionId, value)
+                          }
+                          onItemFieldChange={(sectionId, itemId, field, value) =>
+                            onUpdateItemField(
+                              audience,
+                              sectionId,
+                              itemId,
+                              field,
+                              value,
+                            )
+                          }
+                          onItemDragEnd={(sectionId, event) =>
+                            onItemDragEnd(audience, sectionId, event)
+                          }
+                        />
+                      ))}
+                    </div>
+                  </SortableContext>
+                </DndContext>
+                {draft.sections.length < 2 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Add another section to this draft before reordering sections.
+                  </p>
+                ) : null}
+              </CardContent>
+              <CardFooter className="flex flex-wrap gap-2 border-t">
+                <Button onClick={() => onSaveDraft(audience)} disabled={isMutating}>
+                  Save {formatDisplayLabel(audience)} draft
+                </Button>
+                <Button variant="outline" onClick={onDuplicate} disabled={isMutating}>
+                  Duplicate last newsletter
+                </Button>
+                {hasUnsavedChanges ? (
+                  <Badge variant="secondary">Unsaved changes</Badge>
+                ) : (
+                  <Badge variant="outline">Saved</Badge>
+                )}
+              </CardFooter>
+            </Card>
+          );
+        })}
+      </div>
 
       <div className="space-y-4">
         <Card className="brand-panel">
           <CardHeader>
-            <CardTitle>Audience variants</CardTitle>
+            <CardTitle>Unplaced suggestions</CardTitle>
             <CardDescription>
-              Teacher and parent versions stay separated from the board draft.
+              Place extracted items into the board or teacher draft without overwriting your current edits.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {(
-              ["teachers", "parents"] as Array<AudienceVersion>
-            ).map((audience) => (
+            {visibleSuggestions.length ? (
+              visibleSuggestions.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-2xl border border-border/80 bg-background/75 p-4"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-medium">{item.title}</p>
+                    <StatusIndicator status={item.priority} />
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">{item.summary}</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Badge variant="outline">{formatDisplayLabel(item.source)}</Badge>
+                    <Badge variant="outline">
+                      {formatDisplayLabel(item.recommendedPlacement)}
+                    </Badge>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onPlaceSuggestion("board", item)}
+                    >
+                      Add to board
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onPlaceSuggestion("teachers", item)}
+                    >
+                      Add to teachers
+                    </Button>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="rounded-2xl border border-dashed border-border/80 bg-background/60 p-4 text-sm text-muted-foreground">
+                All extracted suggestions are already placed in the editable drafts.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="brand-panel">
+          <CardHeader>
+            <CardTitle>Parent preview</CardTitle>
+            <CardDescription>
+              The parent version stays read-only here and is derived from the published teacher draft on Sunday.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="rounded-2xl border border-border/80 bg-background/75 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">{state.newsletters.parents.title}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {state.newsletters.parents.summary}
+                  </p>
+                </div>
+                <StatusIndicator status={state.newsletters.parents.status} />
+              </div>
+            </div>
+
+            {state.newsletters.parents.sections.map((section) => (
               <div
-                key={audience}
+                key={section.id}
                 className="rounded-2xl border border-border/80 bg-background/75 p-4"
               >
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm font-medium capitalize">{audience}</p>
+                    <p className="text-sm font-medium">{section.title}</p>
                     <p className="text-xs text-muted-foreground">
-                      {state.newsletters[audience].title}
+                      {formatDisplayLabel(section.kind)}
                     </p>
                   </div>
-                  <StatusIndicator status={state.newsletters[audience].status} />
+                  <Badge variant="outline">{section.items.length} items</Badge>
                 </div>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {state.newsletters[audience].summary}
-                </p>
+                <div className="mt-3 space-y-3">
+                  {section.items.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-2xl border border-border/70 bg-card p-3"
+                    >
+                      <p className="text-sm font-medium">{item.title}</p>
+                      <p className="mt-2 text-sm text-muted-foreground">{item.body}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
             ))}
           </CardContent>
@@ -2301,14 +3425,19 @@ function NewsletterView({
 function ActionsView({
   state,
   approvalDrafts,
+  manualStepDrafts,
   onDraftChange,
   onSave,
   onApprove,
   onReject,
+  onRetry,
+  onManualStepDraftChange,
+  onCompleteManualStep,
   isMutating,
 }: {
   state: DemoState;
   approvalDrafts: Record<string, ApprovalEditInput>;
+  manualStepDrafts: ManualStepDraftMap;
   onDraftChange: (
     actionId: string,
     field: keyof ApprovalEditInput,
@@ -2317,11 +3446,21 @@ function ActionsView({
   onSave: (actionId: string) => void;
   onApprove: (actionId: string) => void;
   onReject: (actionId: string) => void;
+  onRetry: (actionId: string) => void;
+  onManualStepDraftChange: (
+    actionId: string,
+    stepId: string,
+    field: keyof ManualStepDraft,
+    value: string,
+  ) => void;
+  onCompleteManualStep: (actionId: string, stepId: string) => void;
   isMutating: boolean;
 }) {
   return (
     <div className="space-y-4">
       {state.approvals.map((approval) => {
+        const executionStatus = deriveApprovalExecutionStatus(approval);
+        const steps = getApprovalSteps(approval);
         const draft = approvalDrafts[approval.id] ?? {
           subject: approval.subject,
           body: approval.body,
@@ -2335,7 +3474,10 @@ function ActionsView({
             <CardHeader>
               <CardTitle className="flex items-center justify-between gap-3">
                 <span>{approval.title}</span>
-                <StatusIndicator status={approval.status} />
+                <div className="flex items-center gap-2">
+                  <StatusIndicator status={approval.status} />
+                  <StatusIndicator status={executionStatus} />
+                </div>
               </CardTitle>
               <CardDescription>
                 {formatDisplayLabel(approval.channel)} •{" "}
@@ -2391,6 +3533,110 @@ function ActionsView({
                   className="min-h-32"
                 />
               </div>
+              <div className="space-y-3">
+                <p className="text-sm font-medium">Execution steps</p>
+                {steps.map((step) => {
+                  const manualDraft =
+                    manualStepDrafts[stepDraftKey(approval.id, step.id)] ?? {};
+
+                  return (
+                    <div
+                      key={step.id}
+                      className="rounded-2xl border border-border/80 bg-background/75 p-4"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium">{step.label}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatDisplayLabel(step.type)}
+                          </p>
+                        </div>
+                        <StatusIndicator status={step.status} />
+                      </div>
+                      {step.note ? (
+                        <p className="mt-2 text-sm text-muted-foreground">{step.note}</p>
+                      ) : null}
+                      {step.errorMessage ? (
+                        <p className="mt-2 text-sm text-rose-200">{step.errorMessage}</p>
+                      ) : null}
+                      {step.externalUrl ? (
+                        <a
+                          href={step.externalUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-2 inline-block text-sm text-primary underline-offset-4 hover:underline"
+                        >
+                          Open external step
+                        </a>
+                      ) : null}
+
+                      {step.status === "needs_operator" ? (
+                        <div className="mt-4 space-y-3 rounded-2xl border border-dashed border-primary/20 bg-primary/[0.06] p-4">
+                          <Textarea
+                            value={manualDraft.note ?? ""}
+                            onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
+                              onManualStepDraftChange(
+                                approval.id,
+                                step.id,
+                                "note",
+                                event.target.value,
+                              )
+                            }
+                            placeholder="Operator note"
+                            className="min-h-24"
+                          />
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <Input
+                              value={manualDraft.directUrl ?? ""}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                onManualStepDraftChange(
+                                  approval.id,
+                                  step.id,
+                                  "directUrl",
+                                  event.target.value,
+                                )
+                              }
+                              placeholder="Direct URL"
+                            />
+                            <Input
+                              value={manualDraft.externalId ?? ""}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                onManualStepDraftChange(
+                                  approval.id,
+                                  step.id,
+                                  "externalId",
+                                  event.target.value,
+                                )
+                              }
+                              placeholder="External ID"
+                            />
+                          </div>
+                          <Input
+                            value={manualDraft.scheduledFor ?? ""}
+                            onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                              onManualStepDraftChange(
+                                approval.id,
+                                step.id,
+                                "scheduledFor",
+                                event.target.value,
+                              )
+                            }
+                            placeholder="Scheduled timestamp"
+                          />
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => onCompleteManualStep(approval.id, step.id)}
+                            disabled={isMutating}
+                          >
+                            Mark step complete
+                          </Button>
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
             </CardContent>
             <CardFooter className="flex flex-wrap gap-2 border-t">
               <Button
@@ -2416,6 +3662,16 @@ function ActionsView({
               >
                 Reject
               </Button>
+              {["failed", "needs_operator"].includes(executionStatus) ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onRetry(approval.id)}
+                  disabled={isMutating}
+                >
+                  Retry execution
+                </Button>
+              ) : null}
             </CardFooter>
           </Card>
         );

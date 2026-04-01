@@ -7,6 +7,7 @@
     "dev": "pnpm --filter @pta-pilot/shared build && concurrently -n shared,api,web -c yellow,cyan,magenta \"pnpm --filter @pta-pilot/shared dev\" \"pnpm --filter api dev\" \"pnpm --filter web dev\"",
     "build": "turbo run build",
     "lint": "turbo run lint",
+    "test": "turbo run test",
     "typecheck": "turbo run typecheck",
     "clean": "turbo run clean"
   },

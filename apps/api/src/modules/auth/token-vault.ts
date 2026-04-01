@@ -15,6 +15,13 @@ const requiredManagementFields = [
   "AUTH0_MANAGEMENT_CLIENT_SECRET",
 ] as const;
 
+const TOKEN_VAULT_GRANT_TYPE =
+  "urn:auth0:params:oauth:grant-type:token-exchange:federated-connection-access-token";
+const TOKEN_VAULT_REQUESTED_TOKEN_TYPE =
+  "http://auth0.com/oauth/token-type/federated-connection-access-token";
+const TOKEN_VAULT_SUBJECT_TOKEN_TYPE_ACCESS_TOKEN =
+  "urn:ietf:params:oauth:token-type:access_token";
+
 type TokenVaultTokenset = {
   id: string;
   connection: string;
@@ -44,6 +51,8 @@ type GmailApiErrorPayload = {
 };
 
 export type GmailAccessPath = "token_vault" | "identity_provider";
+export type TokenVaultSubjectTokenType =
+  typeof TOKEN_VAULT_SUBJECT_TOKEN_TYPE_ACCESS_TOKEN;
 
 type GmailApiProbe = {
   ok: boolean;
@@ -61,6 +70,12 @@ const missingIdentityAccessTokenBaseNote =
 
 function normalizeAuth0Domain(domain: string) {
   return domain.startsWith("http") ? domain : `https://${domain}`;
+}
+
+function getTokenVaultConnection(runtimeEnv: AppEnv = env) {
+  return (
+    runtimeEnv.AUTH0_TOKEN_VAULT_CONNECTION ?? runtimeEnv.AUTH0_GMAIL_CONNECTION
+  );
 }
 
 function formatMissingIdentityAccessTokenNote(
@@ -150,7 +165,7 @@ async function probeGmailApiAccess(accessToken: string): Promise<GmailApiProbe> 
     return {
       ok: true,
       note:
-        "Google accepted the delegated token for live Gmail API access. PTA Pilot will execute live Gmail actions through the Auth0 identity-provider fallback path until a verified Token Vault exchange flow is added.",
+        "Google accepted the delegated token for live Gmail API access.",
     };
   }
 
@@ -299,14 +314,112 @@ export async function getGmailIdentityAccessToken(
     accessPath: "identity_provider",
     accessToken: gmailIdentity.access_token,
     note:
-      "Using the Auth0 Management API identity-provider access token fallback because this repo does not yet have a verified Token Vault access-token exchange flow.",
+      "Using the Auth0 Management API identity-provider access token fallback because the Token Vault exchange path was unavailable for this request.",
+  };
+}
+
+type TokenVaultExchangePayload = {
+  access_token?: string;
+  expires_in?: number;
+  scope?: string;
+  error?: string;
+  error_description?: string;
+};
+
+function formatTokenVaultExchangeError(
+  status: number,
+  payload: TokenVaultExchangePayload | null,
+) {
+  const details = payload?.error_description?.trim() ?? payload?.error?.trim();
+
+  if (details) {
+    return `Auth0 Token Vault exchange failed: ${details}`;
+  }
+
+  return `Auth0 Token Vault exchange failed with status ${status}.`;
+}
+
+function getTokenVaultExchangeMissingFields(runtimeEnv: AppEnv = env) {
+  return [
+    !runtimeEnv.AUTH0_DOMAIN ? "AUTH0_DOMAIN" : null,
+    !runtimeEnv.AUTH0_CLIENT_ID ? "AUTH0_CLIENT_ID" : null,
+    !runtimeEnv.AUTH0_CLIENT_SECRET ? "AUTH0_CLIENT_SECRET" : null,
+    !getTokenVaultConnection(runtimeEnv)
+      ? "AUTH0_TOKEN_VAULT_CONNECTION or AUTH0_GMAIL_CONNECTION"
+      : null,
+  ].filter((field): field is string => Boolean(field));
+}
+
+export async function exchangeConnectedAccountAccessToken(
+  subjectToken: string,
+  runtimeEnv: AppEnv = env,
+): Promise<GmailAccessTokenBundle> {
+  const missing = getTokenVaultExchangeMissingFields(runtimeEnv);
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Auth0 Token Vault exchange is not configured. Missing: ${missing.join(", ")}`,
+    );
+  }
+
+  if (!subjectToken.trim()) {
+    throw new Error(
+      "Auth0 Token Vault exchange requires the current Auth0 access token from the logged-in web session.",
+    );
+  }
+
+  const auth0Domain = normalizeAuth0Domain(runtimeEnv.AUTH0_DOMAIN!);
+  const response = await fetch(`${auth0Domain}/oauth/token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      grant_type: TOKEN_VAULT_GRANT_TYPE,
+      client_id: runtimeEnv.AUTH0_CLIENT_ID!,
+      client_secret: runtimeEnv.AUTH0_CLIENT_SECRET!,
+      connection: getTokenVaultConnection(runtimeEnv)!,
+      subject_token_type: TOKEN_VAULT_SUBJECT_TOKEN_TYPE_ACCESS_TOKEN,
+      subject_token: subjectToken,
+      requested_token_type: TOKEN_VAULT_REQUESTED_TOKEN_TYPE,
+    }),
+  });
+
+  let payload: TokenVaultExchangePayload | null = null;
+
+  try {
+    payload = (await response.json()) as TokenVaultExchangePayload;
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    throw new Error(formatTokenVaultExchangeError(response.status, payload));
+  }
+
+  if (!payload?.access_token) {
+    throw new Error(
+      "Auth0 Token Vault exchange completed without returning a connected-account access token.",
+    );
+  }
+
+  return {
+    accessPath: "token_vault",
+    accessToken: payload.access_token,
+    note:
+      "Using the Auth0 Token Vault server-side exchange path for delegated Gmail access.",
   };
 }
 
 export async function getGmailTokenVaultStatus(
   userId: string | undefined,
-  runtimeEnv: AppEnv = env,
+  options: {
+    runtimeEnv?: AppEnv;
+    auth0AccessToken?: string;
+    auth0AccessTokenError?: string;
+  } = {},
 ) {
+  const runtimeEnv = options.runtimeEnv ?? env;
   const requiredScopes = getConfiguredGmailScopes(runtimeEnv);
   const managementStatus = getManagementApiStatus(runtimeEnv);
   const tokenVaultStatus = getTokenVaultStatus(runtimeEnv);
@@ -327,51 +440,71 @@ export async function getGmailTokenVaultStatus(
     };
   }
 
-  if (!managementStatus.configured) {
-    return {
-      connection: runtimeEnv.AUTH0_GMAIL_CONNECTION,
-      requiredScopes,
-      grantedScopes: [] as string[],
-      missingScopes: requiredScopes,
-      connected: false,
-      liveReady: false,
-      tokensets: [] as TokenVaultTokenset[],
-      managementApiConfigured: false,
-      tokenVaultConfigured: tokenVaultStatus.configured,
-      actionPath: "unavailable" as const,
-      note: "Management API credentials are required to inspect connected-account status for this user.",
-    };
-  }
-
   let gmailTokensets: TokenVaultTokenset[] = [];
   let grantedScopes: string[] = [];
   let missingScopes: string[] = [];
   let tokensetNote =
     "Token Vault tokensets could not be inspected in this tenant, so PTA Pilot will rely on the Auth0 identity-provider fallback when possible.";
+  let tokenVaultExchangeNote = options.auth0AccessTokenError
+    ? `The authenticated web session could not supply an Auth0 subject token for Token Vault exchange. ${options.auth0AccessTokenError}`
+    : "";
 
   try {
-    const tokensets = await listUserTokenSets(userId, runtimeEnv);
-    gmailTokensets = tokensets.filter(
-      (tokenset) => tokenset.connection === runtimeEnv.AUTH0_GMAIL_CONNECTION,
-    );
-    grantedScopes = Array.from(
-      new Set(
-        gmailTokensets
-          .flatMap((tokenset) => tokenset.scope?.split(" ") ?? [])
-          .map((scope) => scope.trim())
-          .filter(Boolean),
-      ),
-    );
-    missingScopes = requiredScopes.filter(
-      (scope) => !grantedScopes.includes(scope),
-    );
-    tokensetNote =
-      gmailTokensets.length > 0
-        ? "Auth0 found a Gmail tokenset for this user, but PTA Pilot still needs a separate subject-token exchange flow before it can consume Token Vault directly."
-        : "No Gmail tokenset was found for this user yet.";
+    if (managementStatus.configured) {
+      const tokensets = await listUserTokenSets(userId, runtimeEnv);
+      gmailTokensets = tokensets.filter(
+        (tokenset) => tokenset.connection === runtimeEnv.AUTH0_GMAIL_CONNECTION,
+      );
+      grantedScopes = Array.from(
+        new Set(
+          gmailTokensets
+            .flatMap((tokenset) => tokenset.scope?.split(" ") ?? [])
+            .map((scope) => scope.trim())
+            .filter(Boolean),
+        ),
+      );
+      missingScopes = requiredScopes.filter(
+        (scope) => !grantedScopes.includes(scope),
+      );
+      tokensetNote =
+        gmailTokensets.length > 0
+          ? "Auth0 found a Gmail tokenset for this user and PTA Pilot can exchange the authenticated session for delegated Gmail access."
+          : "No Gmail tokenset was found for this user yet.";
+    } else {
+      tokensetNote =
+        "Management API credentials are not configured, so Token Vault tokensets could not be inspected for this user.";
+      missingScopes = requiredScopes;
+    }
   } catch (error) {
     if (error instanceof Error) {
       tokensetNote = `${tokensetNote} ${error.message}`;
+    }
+  }
+
+  if (options.auth0AccessToken) {
+    try {
+      const tokenVaultToken = await exchangeConnectedAccountAccessToken(
+        options.auth0AccessToken,
+        runtimeEnv,
+      );
+      const probe = await probeGmailApiAccess(tokenVaultToken.accessToken);
+
+      return {
+        connection: runtimeEnv.AUTH0_GMAIL_CONNECTION,
+        requiredScopes,
+        grantedScopes,
+        missingScopes,
+        connected: true,
+        liveReady: probe.ok,
+        tokensets: gmailTokensets,
+        managementApiConfigured: managementStatus.configured,
+        tokenVaultConfigured: tokenVaultStatus.configured,
+        actionPath: tokenVaultToken.accessPath,
+        note: [tokensetNote, probe.note].filter(Boolean).join(" "),
+      };
+    } catch (error) {
+      tokenVaultExchangeNote =
+        error instanceof Error ? error.message : "Auth0 Token Vault exchange failed.";
     }
   }
 
@@ -387,10 +520,12 @@ export async function getGmailTokenVaultStatus(
       connected: true,
       liveReady: probe.ok,
       tokensets: gmailTokensets,
-      managementApiConfigured: true,
+      managementApiConfigured: managementStatus.configured,
       tokenVaultConfigured: tokenVaultStatus.configured,
       actionPath: identityToken.accessPath,
-      note: `${tokensetNote} ${probe.note}`,
+      note: [tokensetNote, tokenVaultExchangeNote, probe.note]
+        .filter(Boolean)
+        .join(" "),
     };
   } catch (fallbackError) {
     const fallbackNote =
@@ -410,16 +545,12 @@ export async function getGmailTokenVaultStatus(
       connected: gmailTokensets.length > 0,
       liveReady: false,
       tokensets: gmailTokensets,
-      managementApiConfigured: true,
+      managementApiConfigured: managementStatus.configured,
       tokenVaultConfigured: tokenVaultStatus.configured,
       actionPath: "unavailable" as const,
-      note: `${tokensetNote} ${fallbackNote}`,
+      note: [tokensetNote, tokenVaultExchangeNote, fallbackNote]
+        .filter(Boolean)
+        .join(" "),
     };
   }
-}
-
-export async function exchangeConnectedAccountAccessToken() {
-  throw new Error(
-    "Token Vault access-token exchange is still scaffolded only. This repo has no verified Auth0 audience or subject-token flow configured, so live Gmail currently depends on the Auth0 identity-provider access-token fallback instead.",
-  );
 }

@@ -15,11 +15,27 @@ export const isAuthEnabled = requiredAuth0Env.every(
 export const isTokenVaultConfigured =
   isAuthEnabled && Boolean(process.env.AUTH0_TOKEN_VAULT_CONNECTION);
 
+function mergeAuthScopes(scope: string | undefined) {
+  const defaults = ["openid", "profile", "email", "offline_access"];
+
+  return Array.from(
+    new Set(
+      [
+        ...defaults,
+        ...(scope ?? "")
+          .split(/[,\s]+/)
+          .map((token) => token.trim())
+          .filter(Boolean),
+      ],
+    ),
+  ).join(" ");
+}
+
 const authorizationParameters = {
   ...(process.env.AUTH0_AUDIENCE
     ? { audience: process.env.AUTH0_AUDIENCE }
     : {}),
-  ...(process.env.AUTH0_SCOPE ? { scope: process.env.AUTH0_SCOPE } : {}),
+  scope: mergeAuthScopes(process.env.AUTH0_SCOPE),
 };
 
 const gmailConnection =

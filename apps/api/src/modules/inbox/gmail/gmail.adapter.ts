@@ -1,6 +1,7 @@
 import type { DemoState, GmailMessage, GmailThread } from "@pta-pilot/shared";
 import { env } from "../../../config/env";
 import {
+  exchangeConnectedAccountAccessToken,
   getGmailIdentityAccessToken,
   type GmailAccessPath,
 } from "../../auth/token-vault";
@@ -45,6 +46,7 @@ type GmailSendResponse = {
 
 type GmailAdapterContext = {
   userId?: string;
+  auth0AccessToken?: string;
 };
 
 type DraftInput = {
@@ -287,15 +289,31 @@ class MockGmailAdapter implements GmailAdapter {
   async scheduleSend(): Promise<void> {}
 }
 
-class Auth0IdentityFallbackGmailAdapter implements GmailAdapter {
-  private readonly configReady =
+class LiveGmailAdapter implements GmailAdapter {
+  private readonly fallbackConfigReady =
     Boolean(env.AUTH0_DOMAIN) &&
     Boolean(env.AUTH0_MANAGEMENT_CLIENT_ID) &&
     Boolean(env.AUTH0_MANAGEMENT_CLIENT_SECRET) &&
     Boolean(env.AUTH0_GMAIL_CONNECTION);
 
   private async getAccessToken(context?: GmailAdapterContext) {
-    if (!this.configReady) {
+    if (context?.auth0AccessToken) {
+      try {
+        return await exchangeConnectedAccountAccessToken(context.auth0AccessToken);
+      } catch (error) {
+        if (!this.fallbackConfigReady || !context.userId) {
+          throw error;
+        }
+
+        const fallbackToken = await getGmailIdentityAccessToken(context.userId);
+        return {
+          ...fallbackToken,
+          note: `${error instanceof Error ? error.message : "Auth0 Token Vault exchange failed."} Falling back to the Auth0 identity-provider token path for this request.`,
+        };
+      }
+    }
+
+    if (!this.fallbackConfigReady) {
       throw new Error("Auth0 Management API Gmail fallback is not configured.");
     }
 
@@ -343,7 +361,7 @@ class Auth0IdentityFallbackGmailAdapter implements GmailAdapter {
     state: DemoState,
     context?: GmailAdapterContext,
   ): Promise<GmailThread[]> {
-    if (!this.configReady || !context?.userId) {
+    if ((!this.fallbackConfigReady && !context?.auth0AccessToken) || !context?.userId) {
       return structuredClone(state.inbox.gmailThreads);
     }
 
@@ -482,6 +500,6 @@ class Auth0IdentityFallbackGmailAdapter implements GmailAdapter {
 
 export function createGmailAdapter(mode: "mock" | "live") {
   return mode === "live"
-    ? new Auth0IdentityFallbackGmailAdapter()
+    ? new LiveGmailAdapter()
     : new MockGmailAdapter();
 }

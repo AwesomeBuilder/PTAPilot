@@ -2,6 +2,7 @@ import type {
   AudienceVersion,
   ExtractedContentItem,
   NewsletterDraft,
+  NewsletterDeliveryMeta,
   NewsletterItem,
   NewsletterSection,
 } from "@pta-pilot/shared";
@@ -71,5 +72,65 @@ export function duplicateLastNewsletter(
     publishedAt: undefined,
     scheduledFor: undefined,
     sourceNewsletterId: source.id,
+    delivery: {},
+  };
+}
+
+export function withNewsletterDelivery(
+  draft: NewsletterDraft,
+  update: NewsletterDeliveryMeta,
+): NewsletterDraft {
+  return {
+    ...draft,
+    delivery: {
+      ...(draft.delivery ?? {}),
+      ...update,
+    },
+  };
+}
+
+export function diffNewsletterDrafts(
+  source: NewsletterDraft,
+  target: NewsletterDraft,
+) {
+  const sourceEntries = new Set(
+    source.sections.flatMap((section) =>
+      section.items.map((item) => `${section.title}:${item.title}:${item.body}`),
+    ),
+  );
+  const targetEntries = new Set(
+    target.sections.flatMap((section) =>
+      section.items.map((item) => `${section.title}:${item.title}:${item.body}`),
+    ),
+  );
+
+  const added = [...targetEntries].filter((entry) => !sourceEntries.has(entry));
+  const removed = [...sourceEntries].filter((entry) => !targetEntries.has(entry));
+
+  return {
+    added,
+    removed,
+  };
+}
+
+export function deriveParentDraftFromTeacher(
+  teacherDraft: NewsletterDraft,
+): NewsletterDraft {
+  const parentSections = teacherDraft.sections.filter(
+    (section) => section.kind !== "teacher_note",
+  );
+
+  return {
+    ...structuredClone(teacherDraft),
+    id: "newsletter-parent-draft",
+    audience: "parents",
+    title: "Lincoln PTA Parent Newsletter",
+    summary: "Derived from the teacher-approved version for Sunday parent scheduling.",
+    status: "draft",
+    publishedAt: undefined,
+    scheduledFor: undefined,
+    delivery: {},
+    sections: parentSections,
+    sourceNewsletterId: teacherDraft.id,
   };
 }
