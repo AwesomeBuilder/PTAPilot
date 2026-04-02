@@ -1,6 +1,7 @@
 import type { DemoState, GmailMessage, GmailThread } from "@pta-pilot/shared";
 import { env } from "../../../config/env";
 import {
+  exchangeConnectedAccountAccessToken,
   getGmailIdentityAccessToken,
   type GmailAccessPath,
 } from "../../auth/token-vault";
@@ -45,6 +46,7 @@ type GmailSendResponse = {
 
 type GmailAdapterContext = {
   userId?: string;
+  auth0AccessToken?: string;
 };
 
 type DraftInput = {
@@ -86,6 +88,16 @@ type GmailApiErrorPayload = {
     message?: string;
   };
 };
+
+class GmailApiRequestError extends Error {
+  constructor(
+    readonly status: number,
+    readonly payload: GmailApiErrorPayload | null,
+  ) {
+    super(formatGmailApiError(status, payload));
+    this.name = "GmailApiRequestError";
+  }
+}
 
 export interface GmailAdapter {
   listRecentThreads(
@@ -260,6 +272,14 @@ function formatGmailApiError(status: number, payload: GmailApiErrorPayload | nul
   return `Gmail API request failed with status ${status}.`;
 }
 
+function isMissingGmailDraft(error: unknown) {
+  return (
+    error instanceof GmailApiRequestError &&
+    error.status === 404 &&
+    error.payload?.error?.message?.trim() === "Requested entity was not found."
+  );
+}
+
 class MockGmailAdapter implements GmailAdapter {
   async listRecentThreads(state: DemoState): Promise<GmailThread[]> {
     return structuredClone(state.inbox.gmailThreads);
@@ -287,15 +307,31 @@ class MockGmailAdapter implements GmailAdapter {
   async scheduleSend(): Promise<void> {}
 }
 
-class Auth0IdentityFallbackGmailAdapter implements GmailAdapter {
-  private readonly configReady =
+class LiveGmailAdapter implements GmailAdapter {
+  private readonly fallbackConfigReady =
     Boolean(env.AUTH0_DOMAIN) &&
     Boolean(env.AUTH0_MANAGEMENT_CLIENT_ID) &&
     Boolean(env.AUTH0_MANAGEMENT_CLIENT_SECRET) &&
     Boolean(env.AUTH0_GMAIL_CONNECTION);
 
   private async getAccessToken(context?: GmailAdapterContext) {
-    if (!this.configReady) {
+    if (context?.auth0AccessToken) {
+      try {
+        return await exchangeConnectedAccountAccessToken(context.auth0AccessToken);
+      } catch (error) {
+        if (!this.fallbackConfigReady || !context.userId) {
+          throw error;
+        }
+
+        const fallbackToken = await getGmailIdentityAccessToken(context.userId);
+        return {
+          ...fallbackToken,
+          note: `${error instanceof Error ? error.message : "Auth0 Token Vault exchange failed."} Falling back to the Auth0 identity-provider token path for this request.`,
+        };
+      }
+    }
+
+    if (!this.fallbackConfigReady) {
       throw new Error("Auth0 Management API Gmail fallback is not configured.");
     }
 
@@ -330,7 +366,7 @@ class Auth0IdentityFallbackGmailAdapter implements GmailAdapter {
         payload = null;
       }
 
-      throw new Error(formatGmailApiError(response.status, payload));
+      throw new GmailApiRequestError(response.status, payload);
     }
 
     return {
@@ -343,7 +379,7 @@ class Auth0IdentityFallbackGmailAdapter implements GmailAdapter {
     state: DemoState,
     context?: GmailAdapterContext,
   ): Promise<GmailThread[]> {
-    if (!this.configReady || !context?.userId) {
+    if ((!this.fallbackConfigReady && !context?.auth0AccessToken) || !context?.userId) {
       return structuredClone(state.inbox.gmailThreads);
     }
 
@@ -410,8 +446,11 @@ class Auth0IdentityFallbackGmailAdapter implements GmailAdapter {
       },
     };
 
-    const { data, deliveryPath } = input.draftId
-      ? await this.gmailRequest<GmailApiDraft>(
+    let result: { data: GmailApiDraft; deliveryPath: GmailAccessPath };
+
+    if (input.draftId) {
+      try {
+        result = await this.gmailRequest<GmailApiDraft>(
           `/drafts/${input.draftId}`,
           {
             method: "PUT",
@@ -421,8 +460,13 @@ class Auth0IdentityFallbackGmailAdapter implements GmailAdapter {
             }),
           },
           context,
-        )
-      : await this.gmailRequest<GmailApiDraft>(
+        );
+      } catch (error) {
+        if (!isMissingGmailDraft(error)) {
+          throw error;
+        }
+
+        result = await this.gmailRequest<GmailApiDraft>(
           "/drafts",
           {
             method: "POST",
@@ -430,6 +474,19 @@ class Auth0IdentityFallbackGmailAdapter implements GmailAdapter {
           },
           context,
         );
+      }
+    } else {
+      result = await this.gmailRequest<GmailApiDraft>(
+        "/drafts",
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+        context,
+      );
+    }
+
+    const { data, deliveryPath } = result;
 
     if (!data.id) {
       throw new Error("Gmail draft creation did not return a draft id.");
@@ -444,8 +501,11 @@ class Auth0IdentityFallbackGmailAdapter implements GmailAdapter {
   }
 
   async sendEmail(input: SendInput, context?: GmailAdapterContext): Promise<SendResult> {
-    const { data, deliveryPath } = input.draftId
-      ? await this.gmailRequest<GmailSendResponse>(
+    let result: { data: GmailSendResponse; deliveryPath: GmailAccessPath };
+
+    if (input.draftId) {
+      try {
+        result = await this.gmailRequest<GmailSendResponse>(
           "/drafts/send",
           {
             method: "POST",
@@ -454,8 +514,13 @@ class Auth0IdentityFallbackGmailAdapter implements GmailAdapter {
             }),
           },
           context,
-        )
-      : await this.gmailRequest<GmailSendResponse>(
+        );
+      } catch (error) {
+        if (!isMissingGmailDraft(error)) {
+          throw error;
+        }
+
+        result = await this.gmailRequest<GmailSendResponse>(
           "/messages/send",
           {
             method: "POST",
@@ -465,6 +530,21 @@ class Auth0IdentityFallbackGmailAdapter implements GmailAdapter {
           },
           context,
         );
+      }
+    } else {
+      result = await this.gmailRequest<GmailSendResponse>(
+        "/messages/send",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            raw: buildRawMessage(input),
+          }),
+        },
+        context,
+      );
+    }
+
+    const { data, deliveryPath } = result;
 
     return {
       deliveryPath,
@@ -482,6 +562,6 @@ class Auth0IdentityFallbackGmailAdapter implements GmailAdapter {
 
 export function createGmailAdapter(mode: "mock" | "live") {
   return mode === "live"
-    ? new Auth0IdentityFallbackGmailAdapter()
+    ? new LiveGmailAdapter()
     : new MockGmailAdapter();
 }

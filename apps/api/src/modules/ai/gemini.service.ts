@@ -54,6 +54,7 @@ export class GeminiService {
       const inboxPayload = JSON.stringify({
         gmailThreads: state.inbox.gmailThreads,
         mockMessages: state.inbox.mockMessages,
+        artifacts: state.inbox.artifacts,
       });
       const { GoogleGenAI } = await import("@google/genai");
       const client: any = new GoogleGenAI({
@@ -163,6 +164,24 @@ export class GeminiService {
       };
     });
 
-    return [...emailItems, ...mockItems];
+    const artifactItems = state.inbox.artifacts
+      .filter((artifact) => artifact.extractedText)
+      .map((artifact) => {
+        const text = artifact.extractedText ?? artifact.note ?? artifact.label;
+        const priority = inferPriority(text);
+
+        return {
+          id: `extract-${artifact.id}`,
+          title: titleFromText(text),
+          summary: text,
+          source: "artifact" as MessageSource,
+          sourceRef: artifact.id,
+          priority,
+          recommendedPlacement: inferPlacement(priority),
+          recommendedAsFlyer: false,
+        };
+      });
+
+    return [...emailItems, ...mockItems, ...artifactItems];
   }
 }

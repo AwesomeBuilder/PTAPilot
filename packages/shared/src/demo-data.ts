@@ -31,6 +31,23 @@ export const seedDemoState: DemoState = {
         email: "secretary@lincolnpta.org",
       },
     ],
+    memberRecipients: [
+      {
+        id: "member-avery-gomez",
+        name: "Avery Gomez",
+        email: "avery.gomez@gmail.com",
+      },
+      {
+        id: "member-sam-rivera",
+        name: "Sam Rivera",
+        email: "sam.rivera@gmail.com",
+      },
+      {
+        id: "member-priya-shah",
+        name: "Priya Shah",
+        email: "priya.shah@gmail.com",
+      },
+    ],
     schoolBreaks: [
       {
         id: "break-spring-2026",
@@ -172,6 +189,22 @@ export const seedDemoState: DemoState = {
           "https://images.unsplash.com/photo-1516117172878-fd2c41f4a759?auto=format&fit=crop&w=1200&q=80",
       },
     ],
+    artifacts: [
+      {
+        id: "artifact-calendar-screenshot",
+        type: "calendar_screenshot",
+        label: "April calendar screenshot",
+        createdAt: "2026-03-24T09:58:00-07:00",
+        source: "manual",
+        originalUrl:
+          "https://docs.google.com/drawings/d/1lT_KTCBCwXkMQpv85GfFMMAAmOa6w-j_aK03lcFvvd0/edit",
+        fileName: "april-calendar.png",
+        mimeType: "image/png",
+        storedPath: "apps/api/data/uploads/april-calendar.png",
+        extractedText:
+          "Thursday April 2 STEM Night 5:30 PM. Friday April 3 Coffee with the Principal 8:15 AM. Monday April 6 Spring Break begins.",
+      },
+    ],
     extractedItems: [
       {
         id: "extract-1",
@@ -204,6 +237,134 @@ export const seedDemoState: DemoState = {
         recommendedAsFlyer: false,
       },
     ],
+    unplacedSuggestions: [
+      {
+        id: "extract-1",
+        title: "Attendance Spirit Week reminder",
+        summary: "Schoolwide attendance push should open the newsletter because it affects every family this week.",
+        source: "imessage",
+        sourceRef: "mock-msg-2",
+        priority: "urgent",
+        recommendedPlacement: "Top story",
+        recommendedAsFlyer: false,
+      },
+      {
+        id: "extract-2",
+        title: "STEM Night volunteer ask",
+        summary: "Need 4 setup volunteers and 2 cleanup helpers for Thursday STEM Night.",
+        source: "gmail",
+        sourceRef: "gmail-msg-2",
+        priority: "time_sensitive",
+        recommendedPlacement: "Events section",
+        recommendedAsFlyer: true,
+      },
+      {
+        id: "extract-3",
+        title: "Book Fair family shopping night",
+        summary: "Thursday 5:30-7:00 PM in the library for families.",
+        source: "whatsapp",
+        sourceRef: "mock-msg-1",
+        priority: "time_sensitive",
+        recommendedPlacement: "Events section",
+        recommendedAsFlyer: false,
+      },
+    ],
+  },
+  contentWorkspace: {
+    lastIngestedAt: "2026-03-24T10:05:00-07:00",
+    baseline: {
+      id: "baseline-parent-last",
+      title: "Lincoln PTA Parent Newsletter",
+      sourceLabel: "Most recent parent newsletter",
+      discoveredAt: "2026-03-23T08:04:00-07:00",
+      retrievedAt: "2026-03-23T08:04:00-07:00",
+      retrievalMode: "fallback",
+      note:
+        "Add the latest sent Membership Toolkit newsletter URL or enable live MTK discovery to hydrate the baseline from a real parent newsletter.",
+      sections: [
+        {
+          id: "baseline-section-1",
+          title: "From the PTA",
+          kind: "community",
+          items: [
+            {
+              id: "baseline-item-1",
+              title: "Thank you for Jog-a-Thon support",
+              body:
+                "Families raised over $18,000 and helped fund spring enrichment.",
+              priority: "evergreen",
+              sourceBadges: ["Membership Toolkit"],
+              provenance: [
+                {
+                  id: "baseline-ref-1",
+                  source: "membership_toolkit",
+                  label: "Last published parent newsletter",
+                  ref: "newsletter-parent-last",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    proposedEdits: [
+      {
+        id: "proposed-edit-1",
+        kind: "add",
+        group: "urgent_schoolwide",
+        title: "Attendance Spirit Week reminder",
+        targetSection: "Urgent schoolwide items",
+        proposedValue:
+          "Lead with attendance encouragement and Friday coffee chat timing from the principal.",
+        provenance: [
+          {
+            id: "edit-ref-1",
+            source: "imessage",
+            label: "Principal iMessage",
+            ref: "mock-msg-2",
+          },
+        ],
+        confidence: 0.92,
+        manualReview: false,
+        note: "New urgent schoolwide item absent from the last published parent newsletter.",
+      },
+      {
+        id: "proposed-edit-2",
+        kind: "add",
+        group: "time_sensitive_events",
+        title: "STEM Night volunteer ask",
+        targetSection: "Events",
+        proposedValue:
+          "Need 4 setup volunteers and 2 cleanup helpers for Thursday STEM Night.",
+        provenance: [
+          {
+            id: "edit-ref-2",
+            source: "gmail",
+            label: "Gmail reminder reply",
+            ref: "gmail-msg-2",
+          },
+        ],
+        confidence: 0.89,
+        manualReview: true,
+        note: "Human review recommended because this may become a flyer instead of a text item.",
+      },
+    ],
+    runbook: [
+      {
+        id: "runbook-board",
+        title: "Patch the board-review newsletter in Membership Toolkit",
+        audience: "board_review",
+        action: "edit",
+        instructions: [
+          "Duplicate the latest sent newsletter and rename it for this week's board review.",
+          "Add the attendance reminder at the top of the newsletter.",
+          "Replace the time-sensitive events block with the current STEM Night and Book Fair requests.",
+        ],
+        requiredOutputs: ["directUrl", "externalId"],
+        completionState: "pending",
+        note: "Operator completes the MTK patching while PTA Pilot owns the content plan.",
+      },
+    ],
   },
   newsletters: {
     lastPublishedParent: {
@@ -213,6 +374,7 @@ export const seedDemoState: DemoState = {
       summary: "Last week's published parent edition.",
       status: "published",
       publishedAt: "2026-03-16T18:00:00-07:00",
+      delivery: {},
       sections: [
         {
           id: "section-last-1",
@@ -237,6 +399,7 @@ export const seedDemoState: DemoState = {
       summary: "Board version includes placement notes and edit requests.",
       status: "draft",
       sourceNewsletterId: "newsletter-parent-last",
+      delivery: {},
       sections: [
         {
           id: "section-board-1",
@@ -283,6 +446,7 @@ export const seedDemoState: DemoState = {
       summary: "Teacher version ready for Thursday release.",
       status: "draft",
       sourceNewsletterId: "newsletter-board-draft",
+      delivery: {},
       sections: [
         {
           id: "section-teachers-1",
@@ -307,6 +471,7 @@ export const seedDemoState: DemoState = {
       summary: "Parent version queued for Sunday scheduling.",
       status: "draft",
       sourceNewsletterId: "newsletter-board-draft",
+      delivery: {},
       sections: [
         {
           id: "section-parent-1",
@@ -352,6 +517,18 @@ export const seedDemoState: DemoState = {
       requiresHumanApproval: true,
       createdAt: "2026-03-23T07:45:00-07:00",
       updatedAt: "2026-03-23T08:02:00-07:00",
+      executionStatus: "completed",
+      steps: [
+        {
+          id: "approval-monday-send",
+          label: "Send reminder email",
+          type: "gmail_send",
+          status: "completed",
+          startedAt: "2026-03-23T08:01:00-07:00",
+          completedAt: "2026-03-23T08:02:00-07:00",
+          note: "Reminder sent to PTA member recipients.",
+        },
+      ],
     },
     {
       id: "approval-wednesday",
@@ -367,6 +544,15 @@ export const seedDemoState: DemoState = {
       requiresHumanApproval: true,
       createdAt: "2026-03-24T10:30:00-07:00",
       updatedAt: "2026-03-24T10:30:00-07:00",
+      executionStatus: "not_started",
+      steps: [
+        {
+          id: "approval-wednesday-send",
+          label: "Send board review email",
+          type: "gmail_send",
+          status: "pending",
+        },
+      ],
     },
     {
       id: "approval-thursday",
@@ -382,6 +568,21 @@ export const seedDemoState: DemoState = {
       requiresHumanApproval: true,
       createdAt: "2026-03-24T10:31:00-07:00",
       updatedAt: "2026-03-24T10:31:00-07:00",
+      executionStatus: "not_started",
+      steps: [
+        {
+          id: "approval-thursday-publish",
+          label: "Publish teacher newsletter",
+          type: "publish",
+          status: "pending",
+        },
+        {
+          id: "approval-thursday-send",
+          label: "Email Principal and Teacher Rep",
+          type: "gmail_send",
+          status: "pending",
+        },
+      ],
     },
     {
       id: "approval-sunday",
@@ -398,6 +599,33 @@ export const seedDemoState: DemoState = {
       requiresHumanApproval: true,
       createdAt: "2026-03-24T10:32:00-07:00",
       updatedAt: "2026-03-24T10:32:00-07:00",
+      executionStatus: "not_started",
+      steps: [
+        {
+          id: "approval-sunday-break-check",
+          label: "Check school-break skip logic",
+          type: "break_check",
+          status: "pending",
+        },
+        {
+          id: "approval-sunday-derive",
+          label: "Derive parent version from teacher-approved newsletter",
+          type: "derive_parent",
+          status: "pending",
+        },
+        {
+          id: "approval-sunday-duplicate",
+          label: "Duplicate parent newsletter in Membership Toolkit",
+          type: "duplicate",
+          status: "pending",
+        },
+        {
+          id: "approval-sunday-schedule",
+          label: "Schedule Sunday send",
+          type: "schedule",
+          status: "pending",
+        },
+      ],
     },
   ],
   auditLog: [

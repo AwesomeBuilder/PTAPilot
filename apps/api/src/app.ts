@@ -17,7 +17,7 @@ export function createApp(): Express {
       credentials: true,
     }),
   );
-  app.use(express.json({ limit: "2mb" }));
+  app.use(express.json({ limit: "12mb" }));
 
   app.get("/health", (_request, response) => {
     response.json({

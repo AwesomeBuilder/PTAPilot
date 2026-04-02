@@ -2,6 +2,10 @@ import type { PlannerState, SchoolBreak } from "@pta-pilot/shared";
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
+function formatDateOnly(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
 export function shouldSkipParentSend(
   scheduledFor: string | undefined,
   breaks: SchoolBreak[],
@@ -11,11 +15,15 @@ export function shouldSkipParentSend(
   }
 
   const scheduledDate = new Date(scheduledFor);
-  const sevenDaysLater = new Date(scheduledDate.getTime() + 7 * ONE_DAY_MS);
+  const nextMonday = new Date(scheduledDate.getTime() + ONE_DAY_MS);
+  const nextFriday = new Date(scheduledDate.getTime() + 5 * ONE_DAY_MS);
+  const mondayDate = formatDateOnly(nextMonday);
+  const fridayDate = formatDateOnly(nextFriday);
 
   const matchingBreak = breaks.find((schoolBreak) => {
-    const breakStart = new Date(`${schoolBreak.startsOn}T00:00:00`);
-    return breakStart >= scheduledDate && breakStart <= sevenDaysLater;
+    return (
+      schoolBreak.startsOn <= fridayDate && schoolBreak.endsOn >= mondayDate
+    );
   });
 
   if (!matchingBreak) {
@@ -24,7 +32,7 @@ export function shouldSkipParentSend(
 
   return {
     skip: true,
-    reason: `${matchingBreak.name} starts on ${matchingBreak.startsOn}, so the Sunday parent send should be skipped.`,
+    reason: `${matchingBreak.name} overlaps the school week of ${mondayDate} through ${fridayDate}, so the Sunday parent send should be skipped.`,
   };
 }
 
