@@ -1,0 +1,899 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>PTA Pilot - Technical Guide</title>
+    <style>
+      @page {
+        margin: 0.75in;
+      }
+
+      :root {
+        --green: #1f8f4b;
+        --green-dark: #176c39;
+        --green-soft: #e9f6ee;
+        --ink: #1f2937;
+        --muted: #5b6472;
+        --line: #d9e2ec;
+        --gold: #f6cf61;
+        --white: #ffffff;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        color: var(--ink);
+        font-family: "Helvetica Neue", Arial, sans-serif;
+        font-size: 11pt;
+        line-height: 1.45;
+        margin: 0;
+      }
+
+      h1,
+      h2,
+      h3,
+      h4,
+      p,
+      ul,
+      ol,
+      table {
+        margin-top: 0;
+      }
+
+      h1 {
+        font-size: 30pt;
+        line-height: 1.1;
+        margin-bottom: 6pt;
+      }
+
+      h2 {
+        color: var(--green-dark);
+        font-size: 17pt;
+        margin-bottom: 8pt;
+      }
+
+      h3 {
+        font-size: 12.5pt;
+        margin-bottom: 6pt;
+      }
+
+      p,
+      li {
+        margin-bottom: 7pt;
+      }
+
+      ul,
+      ol {
+        margin-bottom: 10pt;
+        padding-left: 18pt;
+      }
+
+      .page {
+        page-break-after: always;
+      }
+
+      .page:last-child {
+        page-break-after: auto;
+      }
+
+      .cover {
+        background: var(--green);
+        color: var(--white);
+        min-height: 9.2in;
+        padding: 0.7in;
+        position: relative;
+      }
+
+      .cover-logo {
+        background: rgba(255, 255, 255, 0.15);
+        border: 3px solid rgba(255, 255, 255, 0.2);
+        border-radius: 999px;
+        font-size: 18pt;
+        font-style: italic;
+        font-weight: 700;
+        height: 74px;
+        line-height: 66px;
+        margin: 0 auto 20pt auto;
+        text-align: center;
+        width: 74px;
+      }
+
+      .cover-title {
+        font-size: 34pt;
+        font-weight: 800;
+        margin-top: 32pt;
+        text-align: center;
+      }
+
+      .cover-subtitle {
+        font-size: 19pt;
+        font-style: italic;
+        font-weight: 300;
+        margin-bottom: 28pt;
+        text-align: center;
+      }
+
+      .cover-dates {
+        font-size: 14pt;
+        margin-bottom: 28pt;
+        text-align: center;
+      }
+
+      .chip {
+        background: rgba(255, 255, 255, 0.92);
+        border-radius: 6px;
+        color: var(--ink);
+        display: inline-block;
+        font-weight: 600;
+        padding: 2px 8px;
+      }
+
+      .cover-panel {
+        background: rgba(255, 255, 255, 0.08);
+        border: 6px solid rgba(255, 255, 255, 0.9);
+        margin-top: 30pt;
+        min-height: 3.2in;
+        padding: 28pt;
+      }
+
+      .cover-panel h3 {
+        color: var(--white);
+        font-size: 15pt;
+        margin-bottom: 12pt;
+      }
+
+      .cover-panel p,
+      .cover-panel li {
+        font-size: 12pt;
+      }
+
+      .cover-footer {
+        bottom: 18pt;
+        color: rgba(255, 255, 255, 0.82);
+        font-size: 8.5pt;
+        left: 0.7in;
+        position: absolute;
+        right: 0.7in;
+        text-align: right;
+      }
+
+      .kicker {
+        color: var(--muted);
+        font-size: 9.5pt;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        margin-bottom: 8pt;
+        text-transform: uppercase;
+      }
+
+      .callout {
+        background: var(--green-soft);
+        border-left: 4px solid var(--green);
+        margin-bottom: 12pt;
+        padding: 10pt 12pt;
+      }
+
+      .metric-grid {
+        border-collapse: collapse;
+        margin-bottom: 12pt;
+        width: 100%;
+      }
+
+      .metric-grid td {
+        border: 1px solid var(--line);
+        padding: 8pt 10pt;
+        vertical-align: top;
+      }
+
+      .metric-grid td:first-child {
+        background: #f8fafc;
+        font-weight: 700;
+        width: 28%;
+      }
+
+      .feature-grid {
+        border-collapse: separate;
+        border-spacing: 0 8pt;
+        width: 100%;
+      }
+
+      .feature-grid td {
+        background: #f8fafc;
+        border: 1px solid var(--line);
+        padding: 10pt 12pt;
+        vertical-align: top;
+      }
+
+      .feature-grid td:first-child {
+        background: var(--green-soft);
+        color: var(--green-dark);
+        font-weight: 800;
+        width: 22%;
+      }
+
+      .env-table {
+        border-collapse: collapse;
+        font-size: 9.6pt;
+        width: 100%;
+      }
+
+      .env-table th,
+      .env-table td {
+        border: 1px solid var(--line);
+        padding: 7pt 8pt;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      .env-table th {
+        background: var(--green-soft);
+        color: var(--green-dark);
+      }
+
+      .note {
+        color: var(--muted);
+        font-size: 9.5pt;
+      }
+
+      .two-col {
+        display: table;
+        table-layout: fixed;
+        width: 100%;
+      }
+
+      .two-col > div {
+        display: table-cell;
+        padding-right: 12pt;
+        vertical-align: top;
+        width: 50%;
+      }
+
+      .two-col > div:last-child {
+        padding-right: 0;
+        padding-left: 12pt;
+      }
+
+      code {
+        background: #f3f4f6;
+        border-radius: 4px;
+        font-family: Menlo, Consolas, monospace;
+        font-size: 9.6pt;
+        padding: 1px 4px;
+      }
+
+      .footer-link-list li {
+        margin-bottom: 5pt;
+      }
+    </style>
+  </head>
+  <body>
+    <section class="page cover">
+      <div class="cover-logo">PTA</div>
+      <div class="cover-title">PTA Pilot</div>
+      <div class="cover-subtitle">Technical guide</div>
+      <div class="cover-dates">
+        Start <span class="chip">Mar 24, 2026</span>
+        &nbsp; | &nbsp;
+        End <span class="chip">Mar 26, 2026</span>
+      </div>
+      <div class="cover-panel">
+        <h3>Hackathon document target</h3>
+        <p>
+          PTA Pilot is a demo-first PTA communications workflow for the
+          Authorized to Act: Auth0 for AI Agents hackathon. This guide follows
+          the section rhythm of the reference PDF while using only verified PTA
+          Pilot information from the repo, git history, and the official
+          hackathon pages.
+        </p>
+        <ul>
+          <li>Delegated Gmail access through Auth0-oriented flows</li>
+          <li>Explicit human approval before send, publish, or schedule</li>
+          <li>Newsletter drafting across board, teacher, and parent audiences</li>
+          <li>Mock-first setup with live-mode hooks for Gmail and Membership Toolkit</li>
+        </ul>
+      </div>
+      <div class="cover-footer">
+        Generated from repo state and official hackathon details on Apr 1, 2026.
+      </div>
+    </section>
+
+    <section class="page">
+      <div class="kicker">PTA Pilot Technical guide - For technology, software, or systems</div>
+      <h2>Getting Started</h2>
+      <div class="callout">
+        <strong>Source basis.</strong> This document is grounded in
+        <code>README.md</code>, <code>docs/technical-architecture.md</code>,
+        <code>.env.example</code>, implemented code in
+        <code>apps/api</code>, <code>apps/web</code>, and
+        <code>packages/shared</code>, repo git history, and the official
+        Authorized to Act Devpost pages.
+      </div>
+      <table class="metric-grid">
+        <tr>
+          <td>Hackathon</td>
+          <td>Authorized to Act: Auth0 for AI Agents</td>
+        </tr>
+        <tr>
+          <td>Submission window</td>
+          <td>March 2, 2026 at 2:00 PM PST through April 6, 2026 at 11:45 PM PDT</td>
+        </tr>
+        <tr>
+          <td>Judging window</td>
+          <td>April 16, 2026 through April 23, 2026</td>
+        </tr>
+        <tr>
+          <td>Mandatory hackathon requirement</td>
+          <td>All teams must use Auth0 for AI Agents Token Vault</td>
+        </tr>
+      </table>
+      <h3>Submission checklist from the official rules</h3>
+      <ul>
+        <li>Text description explaining project features and functionality</li>
+        <li>Demonstration video of around three minutes</li>
+        <li>Public URL to the code repository</li>
+        <li>Published link to the application or project</li>
+      </ul>
+      <h3>Judging criteria called out by Devpost</h3>
+      <ul>
+        <li>Security Model</li>
+        <li>User Control</li>
+        <li>Technical Execution</li>
+        <li>Design</li>
+        <li>Potential Impact</li>
+        <li>Insight Value</li>
+      </ul>
+      <p class="note">
+        PTA Pilot already aligns strongly with security, user control, and UX
+        clarity. The main hackathon-readiness question is ensuring the live
+        Gmail path can be demonstrated through Token Vault itself rather than
+        only through the Auth0 Management API fallback path.
+      </p>
+    </section>
+
+    <section class="page">
+      <div class="kicker">Introduction</div>
+      <h2>Project Description Overview</h2>
+      <p>
+        PTA Pilot is a hackathon MVP for an AI PTA communications agent. It
+        models a weekly communications workflow for a PTA VP of Communications
+        across Gmail, Membership Toolkit, board review, teacher release, and
+        parent scheduling. The application is built to remain demoable in mock
+        mode while still supporting a live delegated-access story through Auth0.
+      </p>
+      <h3>Purpose</h3>
+      <p>
+        PTA communication work is repetitive and spread across multiple channels:
+        reminder emails, parent replies, teacher notes, board review, newsletter
+        edits, publishing, and scheduled parent sends. PTA Pilot turns that
+        into a structured workflow with a visible planner, editable newsletter
+        drafts, integration status, and explicit approval gates for risky steps.
+      </p>
+      <h3>What the current repo demonstrates</h3>
+      <ul>
+        <li>A dashboard shell with Setup, Inbox, Newsletter Editor, Actions Review, and Audit Log views</li>
+        <li>Mock WhatsApp and iMessage ingestion plus Gmail reminder-thread support</li>
+        <li>Structured extraction into newsletter-ready content items</li>
+        <li>Board and teacher draft editing, with parent drafts derived from the teacher-approved path</li>
+        <li>Approval-gated Gmail send, Membership Toolkit publish, and Membership Toolkit schedule flows</li>
+        <li>Audit history for suggestions, approvals, execution steps, and ingestion events</li>
+      </ul>
+      <h3>Outputs visible in the product today</h3>
+      <ul>
+        <li>Board review draft newsletter</li>
+        <li>Teacher edition newsletter draft</li>
+        <li>Derived parent newsletter draft</li>
+        <li>Approval cards for Monday, Wednesday, Thursday, and Sunday actions</li>
+        <li>Flyer recommendations for visually strong or urgent event items</li>
+      </ul>
+    </section>
+
+    <section class="page">
+      <div class="kicker">Key features</div>
+      <h2>Current Product Capabilities</h2>
+      <table class="feature-grid">
+        <tr>
+          <td>1. Setup and integrations</td>
+          <td>
+            The Setup view stores Auth0 account email, PTA contacts, member
+            recipients, school breaks, and integration modes for Auth0, Gmail,
+            Membership Toolkit, mock messages, and flyer generation.
+          </td>
+        </tr>
+        <tr>
+          <td>2. Multi-source inbox</td>
+          <td>
+            PTA Pilot ingests Gmail reminder-thread replies, mock WhatsApp
+            messages, mock iMessage messages, previous-newsletter links, and
+            OCR-extracted calendar screenshots.
+          </td>
+        </tr>
+        <tr>
+          <td>3. Structured extraction</td>
+          <td>
+            Inbox items are converted into typed extracted content items with a
+            title, summary, source reference, priority, recommended placement,
+            and flyer recommendation flag.
+          </td>
+        </tr>
+        <tr>
+          <td>4. Newsletter drafting</td>
+          <td>
+            The newsletter engine can duplicate the last newsletter, build
+            sections from extracted content, keep urgent items first, and keep
+            time-sensitive items above evergreen content.
+          </td>
+        </tr>
+        <tr>
+          <td>5. Flyer recommendation</td>
+          <td>
+            PTA Pilot identifies candidate items for flyer treatment and creates
+            a school-friendly brief. In mock mode it also assigns a placeholder
+            image URL.
+          </td>
+        </tr>
+        <tr>
+          <td>6. Approval-gated execution</td>
+          <td>
+            Every send, publish, or schedule action is modeled as an approval
+            item with execution steps and visible status transitions.
+          </td>
+        </tr>
+        <tr>
+          <td>7. Live readiness visibility</td>
+          <td>
+            The UI exposes Gmail connect status, required versus granted Gmail
+            scopes, Management API readiness, Token Vault readiness, and Gmail
+            API probe results.
+          </td>
+        </tr>
+      </table>
+    </section>
+
+    <section class="page">
+      <div class="kicker">Architecture</div>
+      <h2>System Architecture</h2>
+      <p>
+        PTA Pilot is implemented as a monorepo with clear frontend, backend, and
+        shared-domain boundaries. The current architecture is demo-first, with
+        local JSON persistence as the happy path and Firestore marked as the
+        live-mode direction.
+      </p>
+      <table class="metric-grid">
+        <tr>
+          <td>Frontend</td>
+          <td>Next.js App Router app in <code>apps/web</code></td>
+        </tr>
+        <tr>
+          <td>Backend</td>
+          <td>Express + TypeScript API in <code>apps/api</code>, intended for Google Cloud Run</td>
+        </tr>
+        <tr>
+          <td>Shared package</td>
+          <td>Typed models, Zod schemas, and seeded demo data in <code>packages/shared</code></td>
+        </tr>
+        <tr>
+          <td>Current persistence</td>
+          <td>Local JSON runtime state in <code>apps/api/data/runtime-state.json</code></td>
+        </tr>
+        <tr>
+          <td>Live data direction</td>
+          <td>Firestore for workflow state and logs</td>
+        </tr>
+      </table>
+      <h3>Frontend responsibilities</h3>
+      <ul>
+        <li>Dashboard UI and workflow navigation</li>
+        <li>Auth0 session handling when env vars are present</li>
+        <li>Proxying <code>/api/*</code> calls to the backend through <code>PTA_API_BASE_URL</code></li>
+        <li>Guest-mode fallback when Auth0 is not configured</li>
+      </ul>
+      <h3>Backend responsibilities</h3>
+      <ul>
+        <li>Server-side token handling and Gmail integration</li>
+        <li>Membership Toolkit adapter selection</li>
+        <li>Inbox artifact storage and OCR</li>
+        <li>Newsletter generation, approval execution, and audit logging</li>
+        <li>Gemini integration and deterministic fallback behavior</li>
+      </ul>
+    </section>
+
+    <section class="page">
+      <div class="kicker">Core modules</div>
+      <h2>Module Inventory</h2>
+      <div class="two-col">
+        <div>
+          <h3><code>auth/</code></h3>
+          <ul>
+            <li>Token Vault status helpers</li>
+            <li>Connected-account token exchange function</li>
+            <li>Auth0 Management API token and profile inspection</li>
+            <li>Gmail scope and probe status reporting</li>
+          </ul>
+          <h3><code>inbox/</code></h3>
+          <ul>
+            <li>Mock and live Gmail adapter behavior</li>
+            <li>Calendar screenshot OCR with <code>sharp</code> and <code>tesseract.js</code></li>
+            <li>Artifact storage for uploaded files</li>
+          </ul>
+          <h3><code>newsletter/</code></h3>
+          <ul>
+            <li>Section building from extracted items</li>
+            <li>Duplicate-last-newsletter flow</li>
+            <li>Parent draft derivation from the teacher-approved path</li>
+          </ul>
+          <h3><code>flyer/</code></h3>
+          <ul>
+            <li>Heuristic flyer-needed decision helper</li>
+            <li>School-friendly flyer brief generation</li>
+            <li>Mock image selection for demo mode</li>
+          </ul>
+        </div>
+        <div>
+          <h3><code>membershipToolkit/</code></h3>
+          <ul>
+            <li>Mock, browser/manual, and live adapter modes</li>
+            <li>Live mode uses Playwright to prepare an operator session</li>
+            <li>Publish and schedule steps can return <code>needs_operator</code> states</li>
+          </ul>
+          <h3><code>planner/</code></h3>
+          <ul>
+            <li>Weekly stage timeline normalization</li>
+            <li>School-break-aware parent-send skip logic</li>
+          </ul>
+          <h3><code>ai/</code></h3>
+          <ul>
+            <li>Gemini service wrapper</li>
+            <li>Prompt files for extraction and drafting</li>
+            <li>Fallback behavior when Vertex is not configured</li>
+          </ul>
+          <h3><code>demo/</code></h3>
+          <ul>
+            <li>Bootstrap, setup updates, ingestion, and newsletter edit routes</li>
+            <li>Approval edit, approve, reject, retry, and manual-complete routes</li>
+            <li>Architecture snapshot endpoint used by the UI</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="page">
+      <div class="kicker">Workflow and control model</div>
+      <h2>Data Flow, Planner Logic, and Approval Boundaries</h2>
+      <h3>Weekly workflow stages</h3>
+      <ul>
+        <li>Monday reminder</li>
+        <li>Collect updates</li>
+        <li>Wednesday board draft</li>
+        <li>Thursday teacher release</li>
+        <li>Sunday parent schedule</li>
+      </ul>
+      <h3>Data flow in the current app</h3>
+      <ol>
+        <li>Setup defines contacts, member recipients, school breaks, and integration modes.</li>
+        <li>Inbox collects Gmail replies, mock messages, previous-newsletter links, and OCR-extracted artifacts.</li>
+        <li>Extraction produces typed content items with priority and placement hints.</li>
+        <li>Newsletter rules build board and teacher drafts from extracted items.</li>
+        <li>Parent newsletters are derived downstream and remain read-only in the editor.</li>
+        <li>Flyer logic recommends visual treatment for suitable items.</li>
+        <li>Approval actions are created for send, publish, and schedule steps.</li>
+        <li>The backend writes audit entries for suggestions, approvals, ingestion, and execution.</li>
+      </ol>
+      <h3>Approval boundaries in the code</h3>
+      <ul>
+        <li>Monday reminder email send</li>
+        <li>Wednesday board review email send</li>
+        <li>Thursday teacher version publish</li>
+        <li>Sunday parent version scheduling</li>
+      </ul>
+      <div class="callout">
+        <strong>Why this matters for the hackathon.</strong> The official judging
+        criteria emphasize explicit permission boundaries and user control. PTA
+        Pilot surfaces risky actions as approval cards, shows scope status in
+        the UI, and keeps delegated access server-side.
+      </div>
+    </section>
+
+    <section class="page">
+      <div class="kicker">Installation</div>
+      <h2>Local Development Setup</h2>
+      <h3>Base setup</h3>
+      <ol>
+        <li>Install dependencies with <code>pnpm install</code>.</li>
+        <li>Copy values from <code>.env.example</code> into <code>apps/web/.env.local</code> and <code>apps/api/.env</code>.</li>
+        <li>Start both apps with <code>pnpm dev</code>.</li>
+        <li>Open <code>http://localhost:3000</code>.</li>
+      </ol>
+      <h3>Current local ports</h3>
+      <ul>
+        <li>Web: <code>http://localhost:3000</code></li>
+        <li>API: <code>http://localhost:8081</code></li>
+      </ul>
+      <h3>Verified commands recorded in the repo README</h3>
+      <ul>
+        <li><code>pnpm typecheck</code></li>
+        <li><code>pnpm --filter web lint</code></li>
+        <li><code>pnpm --filter web build</code></li>
+        <li><code>pnpm --filter api build</code></li>
+        <li><code>pnpm dev</code></li>
+      </ul>
+      <p>
+        The README also records a successful local smoke test returning
+        <code>200 OK</code> from <code>http://localhost:3000</code> and a
+        healthy JSON response from <code>http://localhost:8081/health</code>.
+      </p>
+      <h3>Demo readiness characteristics</h3>
+      <ul>
+        <li>Mock mode works end to end out of the box.</li>
+        <li>Guest/demo mode remains usable even if Auth0 is not configured.</li>
+        <li>Vertex AI is optional for the demo story because deterministic fallbacks exist.</li>
+      </ul>
+    </section>
+
+    <section class="page">
+      <div class="kicker">Dependencies</div>
+      <h2>Runtime, Build, and UI Dependencies</h2>
+      <h3>Monorepo and developer tooling</h3>
+      <ul>
+        <li><code>pnpm@10.14.0</code> via the root <code>packageManager</code> field</li>
+        <li><code>turbo</code> for workspace orchestration</li>
+        <li><code>concurrently</code> for local multi-process development</li>
+        <li><code>TypeScript</code> and <code>vitest</code> across the workspace</li>
+      </ul>
+      <h3>Web application runtime</h3>
+      <ul>
+        <li><code>next@16.2.1</code>, <code>react@19.2.4</code>, <code>react-dom@19.2.4</code></li>
+        <li><code>@auth0/nextjs-auth0</code> for web-session handling</li>
+        <li><code>@dnd-kit/*</code> for drag-and-drop newsletter ordering</li>
+        <li><code>@phosphor-icons/react</code>, <code>radix-ui</code>, and <code>shadcn</code> for UI primitives</li>
+      </ul>
+      <h3>API runtime</h3>
+      <ul>
+        <li><code>express</code> for the backend service</li>
+        <li><code>@google/genai</code> for Gemini integration</li>
+        <li><code>googleapis</code> for Gmail API calls</li>
+        <li><code>firebase-admin</code> for Firestore direction</li>
+        <li><code>playwright</code> for Membership Toolkit live-session support</li>
+        <li><code>sharp</code> and <code>tesseract.js</code> for calendar screenshot OCR</li>
+        <li><code>multer</code> and <code>zod</code> for uploads and schema validation</li>
+      </ul>
+      <p class="note">
+        No additional OS-level dependency installation is documented in this
+        repo. This guide therefore stays with the package-managed setup that is
+        explicitly present.
+      </p>
+    </section>
+
+    <section class="page">
+      <div class="kicker">Live mode prerequisites</div>
+      <h2>Auth0, Gmail, and Membership Toolkit Setup</h2>
+      <h3>Auth0 and Gmail path</h3>
+      <ol>
+        <li>Create or reuse an Auth0 Regular Web Application.</li>
+        <li>Set Allowed Callback URLs to <code>http://localhost:3000/auth/callback</code>.</li>
+        <li>Set Allowed Logout URLs to <code>http://localhost:3000</code>.</li>
+        <li>Configure tenant domain, client ID, client secret, app base URL, and secret in the web and API env files.</li>
+        <li>Enable a Google or Google Workspace connection with the Gmail scopes used by the repo.</li>
+        <li>Configure Auth0 Token Vault for that connection.</li>
+        <li>Create a Machine to Machine app for the Auth0 Management API.</li>
+        <li>Provide Management API credentials to the backend env.</li>
+        <li>Use the Setup screen to connect or reconnect Gmail with the requested <code>connection_scope</code> values.</li>
+        <li>Enable the Gmail API on the Google Cloud project behind the Auth0 Google connection.</li>
+      </ol>
+      <h3>Membership Toolkit modes</h3>
+      <ul>
+        <li><strong>mock</strong>: local JSON-backed behavior for duplicate, update, publish, and schedule</li>
+        <li><strong>manual</strong>: browser/manual path behind the adapter boundary</li>
+        <li><strong>live</strong>: Playwright-prepared operator session with <code>needs_operator</code> steps</li>
+      </ul>
+      <div class="callout">
+        <strong>Important implementation detail.</strong> The backend contains a
+        server-side Token Vault exchange path and an Auth0 Management API
+        fallback path for delegated Gmail access. For the hackathon, the safest
+        final demo path is validating the Token Vault exchange against the
+        target tenant before submission.
+      </div>
+    </section>
+
+    <section class="page">
+      <div class="kicker">Third-party components</div>
+      <h2>External Services Used or Planned</h2>
+      <ul>
+        <li>Auth0 Next.js SDK for authentication and web sessions</li>
+        <li>Auth0 Token Vault and Auth0 Management API for delegated Gmail access status and token handling</li>
+        <li>Google Gmail API for thread sync, draft creation, draft updates, and message sends</li>
+        <li>Membership Toolkit through adapter-driven mock, manual, and live paths</li>
+        <li>Google Vertex AI / Gemini through <code>@google/genai</code></li>
+        <li>Firestore as the planned live persistence layer</li>
+      </ul>
+      <h3>What currently works in live Gmail mode according to the repo</h3>
+      <ul>
+        <li>Recent Gmail thread synchronization</li>
+        <li>Reminder-thread reply fetching</li>
+        <li>Draft creation and draft updates</li>
+        <li>Explicit send after approval</li>
+        <li>Gmail API reachability probing and error explanation in the UI</li>
+      </ul>
+      <h3>Mock-first story preserved for the demo</h3>
+      <ul>
+        <li>Seeded contacts, school breaks, recipients, and message threads</li>
+        <li>Mock WhatsApp and iMessage content collection</li>
+        <li>Mock flyer recommendation images</li>
+        <li>Mock Membership Toolkit duplicate/publish/schedule behavior</li>
+      </ul>
+    </section>
+
+    <section class="page">
+      <div class="kicker">Configuration</div>
+      <h2>Configuration Overview</h2>
+      <p>
+        PTA Pilot is configured through split web and API env files. The repo
+        ships a single <code>.env.example</code> that documents both sections.
+      </p>
+      <h3>Configuration groups</h3>
+      <ul>
+        <li>Web app routing and Auth0 session configuration</li>
+        <li>API port, CORS, and delegated-access configuration</li>
+        <li>Gmail scope and connection configuration</li>
+        <li>Membership Toolkit live-mode credentials</li>
+        <li>Gemini / Vertex and Firestore settings</li>
+        <li>Execution-mode flags such as <code>MEMBERSHIP_TOOLKIT_MODE</code> and <code>FLYER_MODE</code></li>
+      </ul>
+      <div class="callout">
+        <strong>Verified nuance.</strong> The code in
+        <code>apps/api/src/config/env.ts</code> expects tokenset-inspection
+        capability in the Auth0 Management API scope set, and the README
+        explicitly calls out <code>read:federated_connections_tokensets</code>
+        during Auth0 setup.
+      </div>
+      <h3>Current operational defaults in code</h3>
+      <ul>
+        <li>API port defaults to <code>8081</code></li>
+        <li>API base URL defaults to <code>http://localhost:8081</code></li>
+        <li>Google Cloud location defaults to <code>us-central1</code></li>
+        <li>Vertex model defaults to <code>gemini-3.1-pro-preview</code></li>
+        <li>Membership Toolkit and flyer modes default to <code>mock</code></li>
+      </ul>
+    </section>
+
+    <section class="page">
+      <div class="kicker">Web configuration</div>
+      <h2><code>apps/web/.env.local</code></h2>
+      <table class="env-table">
+        <tr>
+          <th>Variable</th>
+          <th>Purpose</th>
+        </tr>
+        <tr>
+          <td><code>APP_BASE_URL</code></td>
+          <td>Base URL for the Next.js app</td>
+        </tr>
+        <tr>
+          <td><code>PTA_API_BASE_URL</code></td>
+          <td>Backend URL used by the Next.js proxy layer</td>
+        </tr>
+        <tr>
+          <td><code>AUTH0_DOMAIN</code></td>
+          <td>Auth0 tenant domain</td>
+        </tr>
+        <tr>
+          <td><code>AUTH0_CLIENT_ID</code></td>
+          <td>Auth0 web application client ID</td>
+        </tr>
+        <tr>
+          <td><code>AUTH0_CLIENT_SECRET</code></td>
+          <td>Auth0 web application client secret</td>
+        </tr>
+        <tr>
+          <td><code>AUTH0_SECRET</code></td>
+          <td>Cookie and session encryption secret</td>
+        </tr>
+        <tr>
+          <td><code>AUTH0_AUDIENCE</code></td>
+          <td>Optional API audience for protected API flows</td>
+        </tr>
+        <tr>
+          <td><code>AUTH0_SCOPE</code></td>
+          <td>Requested Auth0 login scopes</td>
+        </tr>
+        <tr>
+          <td><code>AUTH0_TOKEN_VAULT_CONNECTION</code></td>
+          <td>Connection identifier used for Token Vault-oriented UI status</td>
+        </tr>
+        <tr>
+          <td><code>AUTH0_GMAIL_CONNECTION</code></td>
+          <td>Google connection label used for Gmail connect and status</td>
+        </tr>
+        <tr>
+          <td><code>AUTH0_GMAIL_SCOPES</code></td>
+          <td>Comma-separated Gmail scopes passed as <code>connection_scope</code></td>
+        </tr>
+      </table>
+    </section>
+
+    <section class="page">
+      <div class="kicker">API configuration</div>
+      <h2><code>apps/api/.env</code></h2>
+      <table class="env-table">
+        <tr>
+          <th>Variable</th>
+          <th>Purpose</th>
+        </tr>
+        <tr>
+          <td><code>PORT</code>, <code>APP_BASE_URL</code>, <code>CORS_ORIGIN</code></td>
+          <td>Service port, base URL, and allowed frontend origin list</td>
+        </tr>
+        <tr>
+          <td><code>AUTH0_DOMAIN</code>, <code>AUTH0_CLIENT_ID</code>, <code>AUTH0_CLIENT_SECRET</code>, <code>AUTH0_SECRET</code>, <code>AUTH0_APP_BASE_URL</code>, <code>AUTH0_AUDIENCE</code></td>
+          <td>Core Auth0 delegated-access and app settings</td>
+        </tr>
+        <tr>
+          <td><code>AUTH0_MANAGEMENT_CLIENT_ID</code>, <code>AUTH0_MANAGEMENT_CLIENT_SECRET</code>, <code>AUTH0_MANAGEMENT_API_SCOPE</code></td>
+          <td>Management API credentials and scopes for tokenset inspection and fallback access-token lookup</td>
+        </tr>
+        <tr>
+          <td><code>AUTH0_TOKEN_VAULT_CONNECTION</code>, <code>AUTH0_TOKEN_VAULT_PROVIDER</code>, <code>AUTH0_TOKEN_VAULT_ACCOUNT_ID</code></td>
+          <td>Token Vault connection metadata</td>
+        </tr>
+        <tr>
+          <td><code>AUTH0_GMAIL_CONNECTION</code>, <code>AUTH0_GMAIL_SCOPES</code></td>
+          <td>Expected Gmail connection name and required Gmail scopes</td>
+        </tr>
+        <tr>
+          <td><code>MEMBERSHIP_TOOLKIT_BASE_URL</code>, <code>MEMBERSHIP_TOOLKIT_USERNAME</code>, <code>MEMBERSHIP_TOOLKIT_PASSWORD</code>, <code>MEMBERSHIP_TOOLKIT_STORAGE_STATE_PATH</code>, <code>MEMBERSHIP_TOOLKIT_LOGIN_TIMEOUT_MS</code></td>
+          <td>Membership Toolkit live-mode browser session settings</td>
+        </tr>
+        <tr>
+          <td><code>GOOGLE_CLOUD_PROJECT</code>, <code>GOOGLE_CLOUD_LOCATION</code>, <code>VERTEX_MODEL</code></td>
+          <td>Vertex AI / Gemini configuration</td>
+        </tr>
+        <tr>
+          <td><code>FIREBASE_PROJECT_ID</code>, <code>FIREBASE_CLIENT_EMAIL</code>, <code>FIREBASE_PRIVATE_KEY</code></td>
+          <td>Firestore live persistence settings</td>
+        </tr>
+        <tr>
+          <td><code>MEMBERSHIP_TOOLKIT_MODE</code>, <code>FLYER_MODE</code></td>
+          <td>Execution-mode toggles for Membership Toolkit and flyer generation</td>
+        </tr>
+        <tr>
+          <td><code>DEMO_RUNTIME_STATE_PATH</code></td>
+          <td>Override path for local JSON runtime state persistence</td>
+        </tr>
+      </table>
+    </section>
+
+    <section class="page">
+      <div class="kicker">Additional resources</div>
+      <h2>Repo Links, Hackathon Links, and Next Steps</h2>
+      <h3>Verified project links</h3>
+      <ul class="footer-link-list">
+        <li>Git repo: <a href="https://github.com/AwesomeBuilder/PTAPilot">https://github.com/AwesomeBuilder/PTAPilot</a></li>
+        <li>Architecture summary in repo: <code>docs/technical-architecture.md</code></li>
+        <li>Product-agent rules in repo: <code>Agent.md</code></li>
+        <li>Environment contract in repo: <code>.env.example</code></li>
+      </ul>
+      <h3>Official hackathon and platform references</h3>
+      <ul class="footer-link-list">
+        <li>Hackathon overview: <a href="https://authorizedtoact.devpost.com/">https://authorizedtoact.devpost.com/</a></li>
+        <li>Hackathon rules: <a href="https://authorizedtoact.devpost.com/rules">https://authorizedtoact.devpost.com/rules</a></li>
+        <li>Hackathon dates: <a href="https://authorizedtoact.devpost.com/details/dates">https://authorizedtoact.devpost.com/details/dates</a></li>
+        <li>Auth0 for AI Agents: <a href="https://dev.auth0.com/docs/get-started/auth0-for-ai-agents">https://dev.auth0.com/docs/get-started/auth0-for-ai-agents</a></li>
+        <li>Auth0 Token Vault: <a href="https://dev.auth0.com/docs/secure/tokens/token-vault">https://dev.auth0.com/docs/secure/tokens/token-vault</a></li>
+        <li>Gmail API sending guide: <a href="https://developers.google.com/workspace/gmail/api/guides/sending">https://developers.google.com/workspace/gmail/api/guides/sending</a></li>
+      </ul>
+      <h3>Next steps supported by verified repo evidence</h3>
+      <ul>
+        <li>Validate the live Token Vault exchange path against the target Auth0 tenant and use that in the final hackathon demo</li>
+        <li>Add or verify the published application link required by Devpost, because none is documented in this repo today</li>
+        <li>Decide whether Membership Toolkit live mode should remain operator-assisted for the submission or receive deeper automation</li>
+        <li>Move from JSON runtime state to Firestore only if live persistence is needed for the final demo</li>
+        <li>Use the recorded demo script in the README to produce the required submission video</li>
+      </ul>
+      <p class="note">
+        This guide intentionally avoids claims that are not supported by the
+        current PTA Pilot codebase or the official hackathon materials.
+      </p>
+    </section>
+  </body>
+</html>

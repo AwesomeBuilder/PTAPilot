@@ -1,8 +1,10 @@
 import type { DemoState, NewsletterDraft } from "@pta-pilot/shared";
 import {
+  deriveAudienceDraftTitle,
   duplicateLastNewsletter,
   withNewsletterDelivery,
 } from "../../newsletter/template-engine";
+import { readMembershipToolkitBaseline } from "../baseline-reader";
 import type {
   MembershipToolkitAdapter,
   MembershipToolkitOperationResult,
@@ -13,20 +15,25 @@ export class MockMembershipToolkitAdapter implements MembershipToolkitAdapter {
     return structuredClone(state.newsletters.lastPublishedParent);
   }
 
+  async getBaseline(state: DemoState) {
+    return readMembershipToolkitBaseline(state, {
+      allowBrowserDiscovery: false,
+    });
+  }
+
   async duplicateNewsletter(
     state: DemoState,
     audience: NewsletterDraft["audience"],
     sourceDraft?: NewsletterDraft,
   ): Promise<MembershipToolkitOperationResult> {
     const source = sourceDraft ?? state.newsletters.lastPublishedParent;
-    const titleMap = {
-      board: "Lincoln PTA Board Review Draft",
-      teachers: "Lincoln PTA Teacher Edition",
-      parents: "Lincoln PTA Parent Newsletter",
-    } as const;
 
     const draft = withNewsletterDelivery(
-      duplicateLastNewsletter(source, audience, titleMap[audience]),
+      duplicateLastNewsletter(
+        source,
+        audience,
+        deriveAudienceDraftTitle(source.title, audience),
+      ),
       {
         externalId: `mock-${audience}-${crypto.randomUUID()}`,
         directUrl: `https://mock.membership-toolkit.local/${audience}/${crypto.randomUUID()}`,

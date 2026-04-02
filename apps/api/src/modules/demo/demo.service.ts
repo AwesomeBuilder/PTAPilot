@@ -25,10 +25,16 @@ import {
   generateFlyerImage,
 } from "../flyer/flyer.service";
 import { createInboxArtifact } from "../inbox/artifact-storage";
+import { refreshCalendarArtifactFromSource } from "../inbox/calendar-source";
 import { createGmailAdapter } from "../inbox/gmail/gmail.adapter";
 import { createMembershipToolkitAdapter } from "../membershipToolkit/membershipToolkit.adapter";
 import {
+  buildContentWorkspace,
+  rebuildContentWorkspaceFromDrafts,
+} from "../newsletter/content-workspace";
+import {
   buildSectionsFromExtracted,
+  deriveAudienceDraftTitle,
   deriveParentDraftFromTeacher,
   diffNewsletterDrafts,
   duplicateLastNewsletter as buildDuplicateNewsletter,
@@ -92,6 +98,22 @@ function deriveExecutionStatus(
 function describeDiffEntry(entry: string, verb: "Added" | "Removed") {
   const [sectionTitle, itemTitle] = entry.split(":");
   return `${verb} "${itemTitle}" in ${sectionTitle}`;
+}
+
+function getReusableGmailDraft(approval: ApprovalAction) {
+  if (
+    approval.gmailExecution?.lastAction !== "draft_saved" ||
+    !approval.gmailExecution.draftId
+  ) {
+    return undefined;
+  }
+
+  return {
+    deliveryPath: approval.gmailExecution.deliveryPath,
+    draftId: approval.gmailExecution.draftId,
+    draftMessageId: approval.gmailExecution.draftMessageId,
+    threadId: approval.gmailExecution.threadId,
+  };
 }
 
 export class DemoService {
@@ -188,14 +210,16 @@ export class DemoService {
       const boardRecipients = dedupeEmails(
         state.setup.contacts
           .filter((contact) =>
-            /(pta|board|president|secretary)/i.test(contact.role),
+            /(pta|board|president|vice president|vp|secretary|treasurer|chair)/i.test(
+              contact.role,
+            ),
           )
           .map((contact) => contact.email),
       );
 
       if (!boardRecipients.length) {
         throw new Error(
-          "No board-review recipients are configured in Setup. Add PTA board contacts before sending a live Gmail board review email.",
+          "No board-review recipients are configured in Settings > Contacts. Add PTA board contacts in Staff and board contacts before sending a live Gmail board review email.",
         );
       }
 
@@ -285,6 +309,147 @@ export class DemoService {
     return extractedItems.filter(
       (item) => !placed.has(this.buildSuggestionKey(item)),
     );
+  }
+
+  private mergeOperationalDraft(
+    current: NewsletterDraft,
+    next: NewsletterDraft,
+  ): NewsletterDraft {
+    return {
+      ...next,
+      status: current.status,
+      publishedAt: current.publishedAt ?? next.publishedAt,
+      scheduledFor: current.scheduledFor ?? next.scheduledFor,
+      delivery:
+        current.delivery && Object.keys(current.delivery).length
+          ? current.delivery
+          : next.delivery,
+    };
+  }
+
+  private async refreshContentWorkspace(
+    state: DemoState,
+    requestContext?: RequestContext,
+    options?: {
+      recordFailure?: boolean;
+      recordAudit?: boolean;
+      syncGmail?: boolean;
+    },
+  ) {
+    const shouldSyncGmail = options?.syncGmail ?? true;
+    const gmailSync = shouldSyncGmail
+      ? await this.syncLiveGmailInbox(state, requestContext, {
+          recordFailure: options?.recordFailure,
+        })
+      : {
+          synced: false,
+          reminderReplies: 0,
+          threads: state.inbox.gmailThreads,
+        };
+
+    state.inbox.artifacts = await Promise.all(
+      state.inbox.artifacts.map((artifact) =>
+        artifact.type === "calendar_screenshot"
+          ? refreshCalendarArtifactFromSource(artifact)
+          : Promise.resolve(artifact),
+      ),
+    );
+
+    const baseline = await this.membershipToolkit.getBaseline(state);
+    const extractedItems = await this.aiService.extractStructuredContent(state);
+    const generated = buildContentWorkspace(state, {
+      baseline,
+      extractedItems,
+    });
+
+    const flyerRecommendations: FlyerRecommendation[] = await Promise.all(
+      extractedItems
+        .filter(decideIfFlyerNeeded)
+        .slice(0, 2)
+        .map(async (item) => {
+          const recommendation: FlyerRecommendation = {
+            id: `flyer-${item.id}`,
+            title: item.title,
+            brief: generateFlyerBrief(item),
+            reason:
+              "This item is time-sensitive and more likely to perform well as a flyer or card.",
+            status: "generated",
+          };
+
+          return {
+            ...recommendation,
+            imageUrl: await generateFlyerImage(recommendation),
+          };
+        }),
+    );
+
+    state.inbox.extractedItems = extractedItems;
+    state.contentWorkspace = generated.contentWorkspace;
+    state.newsletters.lastPublishedParent = {
+      ...state.newsletters.lastPublishedParent,
+      title: baseline.title,
+      summary: baseline.note ?? "Most recent sent parent newsletter baseline.",
+      sections: structuredClone(baseline.sections),
+      delivery: {
+        ...state.newsletters.lastPublishedParent.delivery,
+        directUrl:
+          baseline.sourceUrl ??
+          state.newsletters.lastPublishedParent.delivery?.directUrl,
+        lastSyncedAt: baseline.retrievedAt,
+      },
+    };
+    state.newsletters.board = this.mergeOperationalDraft(
+      state.newsletters.board,
+      generated.newsletters.board,
+    );
+    state.newsletters.teachers = this.mergeOperationalDraft(
+      state.newsletters.teachers,
+      generated.newsletters.teachers,
+    );
+    state.newsletters.parents = this.mergeOperationalDraft(
+      state.newsletters.parents,
+      generated.newsletters.parents,
+    );
+    state.inbox.unplacedSuggestions = this.filterUnplacedSuggestions(
+      state,
+      extractedItems,
+    );
+    state.flyerRecommendations = flyerRecommendations;
+    state.approvals = generated.approvals.map((approval) => ({
+      ...approval,
+      executionStatus:
+        approval.executionStatus ?? deriveExecutionStatus(approval.steps),
+    }));
+
+    if (options?.recordAudit ?? true) {
+      state.auditLog.unshift(
+        buildAuditEntry(
+          "ingestion",
+          "membership_toolkit",
+          baseline.retrievalMode === "automatic"
+            ? `Pulled the latest Membership Toolkit baseline from ${baseline.sourceUrl ?? "the sent-newsletter feed"}.`
+            : baseline.note ??
+                "Used the stored PTA Pilot newsletter baseline as a fallback.",
+        ),
+      );
+      state.auditLog.unshift(
+        buildAuditEntry(
+          "ingestion",
+          "ai",
+          `Ingested Gmail, mock channels, the MTK baseline, and the calendar source into a structured content workspace with ${generated.contentWorkspace.proposedEdits.length} proposed edit(s).`,
+        ),
+      );
+    }
+
+    if (gmailSync.synced && (options?.recordAudit ?? true)) {
+      state.auditLog.unshift(
+        buildAuditEntry(
+          "ingestion",
+          "gmail",
+          `Synced ${gmailSync.threads.length} live Gmail thread(s), including ${gmailSync.reminderReplies} reply message(s) from the reminder thread.`,
+        ),
+      );
+    }
   }
 
   private async syncLiveGmailInbox(
@@ -413,25 +578,20 @@ export class DemoService {
 
     try {
       const currentApproval = this.findApproval(state, actionId);
+      const reusableDraft = getReusableGmailDraft(currentApproval);
       const draft =
-        currentApproval.gmailExecution?.draftId
-          ? {
-              deliveryPath: currentApproval.gmailExecution.deliveryPath,
-              draftId: currentApproval.gmailExecution.draftId,
-              draftMessageId: currentApproval.gmailExecution.draftMessageId,
-              threadId: currentApproval.gmailExecution.threadId,
-            }
-          : await this.liveGmail.createDraft(
-              {
-                to: recipients,
-                subject,
-                body,
-              },
-              {
-                userId: requestContext.userId,
-                auth0AccessToken: requestContext.auth0AccessToken,
-              },
-            );
+        reusableDraft ??
+        (await this.liveGmail.createDraft(
+          {
+            to: recipients,
+            subject,
+            body,
+          },
+          {
+            userId: requestContext.userId,
+            auth0AccessToken: requestContext.auth0AccessToken,
+          },
+        ));
 
       const sent = await this.liveGmail.sendEmail(
         {
@@ -453,8 +613,6 @@ export class DemoService {
         gmailExecution: {
           deliveryPath: sent.deliveryPath,
           lastAction: "sent",
-          draftId: draft.draftId,
-          draftMessageId: draft.draftMessageId,
           threadId: sent.threadId ?? draft.threadId,
           sentMessageId: sent.messageId,
           note: `Sent through live Gmail to ${recipients.length} recipient(s).`,
@@ -846,7 +1004,10 @@ export class DemoService {
     state.setup.integrations.gmail.status = getTokenVaultStatus().configured
       ? "connected"
       : "needs_setup";
-    await this.syncLiveGmailInbox(state, requestContext);
+    await this.refreshContentWorkspace(state, requestContext, {
+      recordFailure: false,
+      recordAudit: false,
+    });
     await this.store.write(state);
     return state;
   }
@@ -959,41 +1120,10 @@ export class DemoService {
 
   async ingestUpdates(requestContext?: RequestContext): Promise<DemoState> {
     const state = await this.store.read();
-    const gmailSync = await this.syncLiveGmailInbox(state, requestContext, {
+    await this.refreshContentWorkspace(state, requestContext, {
       recordFailure: true,
+      recordAudit: true,
     });
-    const extractedItems = await this.aiService.extractStructuredContent(state);
-
-    const flyerRecommendations: FlyerRecommendation[] = await Promise.all(
-      extractedItems
-        .filter(decideIfFlyerNeeded)
-        .slice(0, 2)
-        .map(async (item) => {
-          const recommendation: FlyerRecommendation = {
-            id: `flyer-${item.id}`,
-            title: item.title,
-            brief: generateFlyerBrief(item),
-            reason:
-              "This item is time-sensitive and more likely to perform well as a flyer or card.",
-            status: "generated",
-          };
-
-          return {
-            ...recommendation,
-            imageUrl: await generateFlyerImage(recommendation),
-          };
-        }),
-    );
-
-    state.inbox.extractedItems = extractedItems;
-    state.inbox.unplacedSuggestions = this.filterUnplacedSuggestions(
-      state,
-      extractedItems,
-    );
-    state.flyerRecommendations = flyerRecommendations;
-    if (!state.newsletters.board.sections.length) {
-      state.newsletters.board.sections = buildSectionsFromExtracted(extractedItems);
-    }
     state.planner.currentStage = "wednesday_draft";
     state.planner.timeline = state.planner.timeline.map((entry) =>
       entry.stage === "collect_updates"
@@ -1012,22 +1142,6 @@ export class DemoService {
       executionStatus:
         approval.executionStatus ?? deriveExecutionStatus(approval.steps),
     }));
-    state.auditLog.unshift(
-      buildAuditEntry(
-        "ingestion",
-        "ai",
-        `Ingested inbox content and extracted ${extractedItems.length} structured updates without overwriting saved newsletter drafts.`,
-      ),
-    );
-    if (gmailSync.synced) {
-      state.auditLog.unshift(
-        buildAuditEntry(
-          "ingestion",
-          "gmail",
-          `Synced ${gmailSync.threads.length} live Gmail thread(s), including ${gmailSync.reminderReplies} reply message(s) from the reminder thread.`,
-        ),
-      );
-    }
     await this.store.write(state);
     return state;
   }
@@ -1039,18 +1153,25 @@ export class DemoService {
     state.newsletters.board = buildDuplicateNewsletter(
       source,
       "board",
-      "Lincoln PTA Board Review Draft",
+      deriveAudienceDraftTitle(source.title, "board"),
     );
     state.newsletters.teachers = buildDuplicateNewsletter(
       source,
       "teachers",
-      "Lincoln PTA Teacher Edition",
+      deriveAudienceDraftTitle(source.title, "teachers"),
     );
     state.newsletters.parents = buildDuplicateNewsletter(
       source,
       "parents",
-      "Lincoln PTA Parent Newsletter",
+      deriveAudienceDraftTitle(source.title, "parents"),
     );
+    const rebuilt = rebuildContentWorkspaceFromDrafts(state);
+    state.contentWorkspace = rebuilt.contentWorkspace;
+    state.approvals = rebuilt.approvals.map((approval) => ({
+      ...approval,
+      executionStatus:
+        approval.executionStatus ?? deriveExecutionStatus(approval.steps),
+    }));
     state.auditLog.unshift(
       buildAuditEntry(
         "execution",
@@ -1086,7 +1207,7 @@ export class DemoService {
             to: recipients,
             subject: input.subject,
             body: input.body,
-            draftId: updatedAction.gmailExecution?.draftId,
+            draftId: getReusableGmailDraft(updatedAction)?.draftId,
           },
           {
             userId: requestContext.userId,
@@ -1141,6 +1262,12 @@ export class DemoService {
     requestContext?: RequestContext,
   ): Promise<DemoState> {
     const state = await this.store.read();
+    if (actionId !== "approval-monday") {
+      await this.refreshContentWorkspace(state, requestContext, {
+        recordFailure: true,
+        recordAudit: true,
+      });
+    }
     const action = this.updateApproval(state, actionId, (approval) => ({
       ...approval,
       status: "approved",
@@ -1165,6 +1292,12 @@ export class DemoService {
     requestContext?: RequestContext,
   ): Promise<DemoState> {
     const state = await this.store.read();
+    if (actionId !== "approval-monday") {
+      await this.refreshContentWorkspace(state, requestContext, {
+        recordFailure: true,
+        recordAudit: true,
+      });
+    }
     const action = this.findApproval(state, actionId);
     const retryableStep = action.steps.find((step) =>
       ["failed", "needs_operator"].includes(step.status),
@@ -1177,6 +1310,25 @@ export class DemoService {
         startedAt: undefined,
         errorMessage: undefined,
       });
+    } else if (
+      action.channel === "gmail" &&
+      ["send_reminder_email", "send_board_draft_email", "publish_teacher_version"].includes(
+        action.type,
+      )
+    ) {
+      const replayStepId =
+        action.type === "publish_teacher_version"
+          ? "approval-thursday-send"
+          : action.steps[0]?.id;
+
+      if (replayStepId) {
+        this.updateApprovalStep(state, actionId, replayStepId, {
+          status: "pending",
+          completedAt: undefined,
+          startedAt: undefined,
+          errorMessage: undefined,
+        });
+      }
     }
 
     state.auditLog.unshift(
@@ -1216,6 +1368,11 @@ export class DemoService {
       ),
     );
 
+    await this.refreshContentWorkspace(state, requestContext, {
+      recordFailure: false,
+      recordAudit: false,
+      syncGmail: false,
+    });
     await this.executeActionWorkflow(state, actionId, requestContext);
     await this.store.write(state);
     return state;
@@ -1260,6 +1417,17 @@ export class DemoService {
       state,
       draft,
     );
+    const rebuilt = rebuildContentWorkspaceFromDrafts(state);
+    state.contentWorkspace = rebuilt.contentWorkspace;
+    state.newsletters.parents = this.mergeOperationalDraft(
+      state.newsletters.parents,
+      rebuilt.newsletters.parents,
+    );
+    state.approvals = rebuilt.approvals.map((approval) => ({
+      ...approval,
+      executionStatus:
+        approval.executionStatus ?? deriveExecutionStatus(approval.steps),
+    }));
     state.inbox.unplacedSuggestions = this.filterUnplacedSuggestions(
       state,
       state.inbox.extractedItems,

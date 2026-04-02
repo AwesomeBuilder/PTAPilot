@@ -40,4 +40,39 @@ describe("RuntimeStore", () => {
       expect(approval.steps.length).toBeGreaterThan(0);
     }
   });
+
+  it("removes the old placeholder MTK newsletter URL from persisted state", async () => {
+    const legacyState = structuredClone(seedDemoState);
+    legacyState.inbox.artifacts.unshift({
+      id: "artifact-placeholder",
+      type: "previous_newsletter_link",
+      label: "Previous newsletter link",
+      createdAt: "2026-04-02T09:00:00-07:00",
+      source: "manual",
+      originalUrl: "https://lincolnpta.membershiptoolkit.com/newsletter/last-week",
+    });
+    legacyState.newsletters.lastPublishedParent.delivery = {
+      directUrl: "https://lincolnpta.membershiptoolkit.com/newsletter/last-week",
+      externalId: "mtk-last-week",
+    };
+    if (legacyState.contentWorkspace.baseline) {
+      legacyState.contentWorkspace.baseline.sourceUrl =
+        "https://lincolnpta.membershiptoolkit.com/newsletter/last-week";
+    }
+
+    await writeFile(filePath, JSON.stringify(legacyState, null, 2), "utf-8");
+
+    const state = await store.read();
+
+    expect(
+      state.inbox.artifacts.some(
+        (artifact) =>
+          artifact.type === "previous_newsletter_link" &&
+          artifact.originalUrl ===
+            "https://lincolnpta.membershiptoolkit.com/newsletter/last-week",
+      ),
+    ).toBe(false);
+    expect(state.newsletters.lastPublishedParent.delivery?.directUrl).toBeUndefined();
+    expect(state.contentWorkspace.baseline?.sourceUrl).toBeUndefined();
+  });
 });

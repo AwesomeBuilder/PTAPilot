@@ -89,6 +89,16 @@ type GmailApiErrorPayload = {
   };
 };
 
+class GmailApiRequestError extends Error {
+  constructor(
+    readonly status: number,
+    readonly payload: GmailApiErrorPayload | null,
+  ) {
+    super(formatGmailApiError(status, payload));
+    this.name = "GmailApiRequestError";
+  }
+}
+
 export interface GmailAdapter {
   listRecentThreads(
     state: DemoState,
@@ -262,6 +272,14 @@ function formatGmailApiError(status: number, payload: GmailApiErrorPayload | nul
   return `Gmail API request failed with status ${status}.`;
 }
 
+function isMissingGmailDraft(error: unknown) {
+  return (
+    error instanceof GmailApiRequestError &&
+    error.status === 404 &&
+    error.payload?.error?.message?.trim() === "Requested entity was not found."
+  );
+}
+
 class MockGmailAdapter implements GmailAdapter {
   async listRecentThreads(state: DemoState): Promise<GmailThread[]> {
     return structuredClone(state.inbox.gmailThreads);
@@ -348,7 +366,7 @@ class LiveGmailAdapter implements GmailAdapter {
         payload = null;
       }
 
-      throw new Error(formatGmailApiError(response.status, payload));
+      throw new GmailApiRequestError(response.status, payload);
     }
 
     return {
@@ -428,8 +446,11 @@ class LiveGmailAdapter implements GmailAdapter {
       },
     };
 
-    const { data, deliveryPath } = input.draftId
-      ? await this.gmailRequest<GmailApiDraft>(
+    let result: { data: GmailApiDraft; deliveryPath: GmailAccessPath };
+
+    if (input.draftId) {
+      try {
+        result = await this.gmailRequest<GmailApiDraft>(
           `/drafts/${input.draftId}`,
           {
             method: "PUT",
@@ -439,8 +460,13 @@ class LiveGmailAdapter implements GmailAdapter {
             }),
           },
           context,
-        )
-      : await this.gmailRequest<GmailApiDraft>(
+        );
+      } catch (error) {
+        if (!isMissingGmailDraft(error)) {
+          throw error;
+        }
+
+        result = await this.gmailRequest<GmailApiDraft>(
           "/drafts",
           {
             method: "POST",
@@ -448,6 +474,19 @@ class LiveGmailAdapter implements GmailAdapter {
           },
           context,
         );
+      }
+    } else {
+      result = await this.gmailRequest<GmailApiDraft>(
+        "/drafts",
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+        context,
+      );
+    }
+
+    const { data, deliveryPath } = result;
 
     if (!data.id) {
       throw new Error("Gmail draft creation did not return a draft id.");
@@ -462,8 +501,11 @@ class LiveGmailAdapter implements GmailAdapter {
   }
 
   async sendEmail(input: SendInput, context?: GmailAdapterContext): Promise<SendResult> {
-    const { data, deliveryPath } = input.draftId
-      ? await this.gmailRequest<GmailSendResponse>(
+    let result: { data: GmailSendResponse; deliveryPath: GmailAccessPath };
+
+    if (input.draftId) {
+      try {
+        result = await this.gmailRequest<GmailSendResponse>(
           "/drafts/send",
           {
             method: "POST",
@@ -472,8 +514,13 @@ class LiveGmailAdapter implements GmailAdapter {
             }),
           },
           context,
-        )
-      : await this.gmailRequest<GmailSendResponse>(
+        );
+      } catch (error) {
+        if (!isMissingGmailDraft(error)) {
+          throw error;
+        }
+
+        result = await this.gmailRequest<GmailSendResponse>(
           "/messages/send",
           {
             method: "POST",
@@ -483,6 +530,21 @@ class LiveGmailAdapter implements GmailAdapter {
           },
           context,
         );
+      }
+    } else {
+      result = await this.gmailRequest<GmailSendResponse>(
+        "/messages/send",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            raw: buildRawMessage(input),
+          }),
+        },
+        context,
+      );
+    }
+
+    const { data, deliveryPath } = result;
 
     return {
       deliveryPath,

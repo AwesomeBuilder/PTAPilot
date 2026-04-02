@@ -19,7 +19,7 @@ function buildLabel(type: InboxArtifactType, provided?: string) {
     : "Calendar screenshot";
 }
 
-async function preprocessImage(buffer: Buffer) {
+export async function preprocessImage(buffer: Buffer) {
   return sharp(buffer)
     .rotate()
     .flatten({ background: "#ffffff" })
@@ -30,7 +30,7 @@ async function preprocessImage(buffer: Buffer) {
     .toBuffer();
 }
 
-async function runOcr(buffer: Buffer) {
+export async function runOcr(buffer: Buffer) {
   const worker = await createWorker("eng");
 
   try {
@@ -41,6 +41,16 @@ async function runOcr(buffer: Buffer) {
   } finally {
     await worker.terminate();
   }
+}
+
+export async function extractTextFromImageBuffer(buffer: Buffer) {
+  const processedBuffer = await preprocessImage(buffer);
+  const extractedText = await runOcr(processedBuffer);
+
+  return {
+    processedBuffer,
+    extractedText,
+  };
 }
 
 export async function createInboxArtifact(input: {
@@ -84,8 +94,9 @@ export async function createInboxArtifact(input: {
   const processedFileName = `${baseArtifact.id}-processed.png`;
   const originalPath = join(uploadDir, fileName);
   const processedPath = join(uploadDir, processedFileName);
-  const processedBuffer = await preprocessImage(input.file.buffer);
-  const extractedText = await runOcr(processedBuffer);
+  const { processedBuffer, extractedText } = await extractTextFromImageBuffer(
+    input.file.buffer,
+  );
 
   await writeFile(originalPath, input.file.buffer);
   await writeFile(processedPath, processedBuffer);

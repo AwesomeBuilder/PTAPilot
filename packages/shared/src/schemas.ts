@@ -26,6 +26,23 @@ export const newsletterItemSchema = z.object({
   priority: z.enum(["urgent", "time_sensitive", "evergreen"]),
   sourceBadges: z.array(z.string()),
   flyerRecommended: z.boolean().optional(),
+  provenance: z
+    .array(
+      z.object({
+        id: z.string(),
+        source: z.enum([
+          "gmail",
+          "whatsapp",
+          "imessage",
+          "artifact",
+          "calendar",
+          "membership_toolkit",
+        ]),
+        label: z.string().min(1),
+        ref: z.string().optional(),
+      }),
+    )
+    .optional(),
 });
 
 export const newsletterSectionSchema = z.object({
@@ -40,6 +57,8 @@ export const newsletterSectionSchema = z.object({
     "flyer",
   ]),
   items: z.array(newsletterItemSchema),
+  locked: z.boolean().optional(),
+  lockedReason: z.string().optional(),
 });
 
 export const newsletterDraftSchema = z.object({

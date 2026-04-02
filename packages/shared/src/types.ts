@@ -20,6 +20,11 @@ export type AudienceVersion = "board" | "teachers" | "parents";
 
 export type ContentPriority = "urgent" | "time_sensitive" | "evergreen";
 
+export type WorkspaceSource =
+  | MessageSource
+  | "calendar"
+  | "membership_toolkit";
+
 export type InboxArtifactType =
   | "previous_newsletter_link"
   | "calendar_screenshot";
@@ -162,6 +167,7 @@ export interface NewsletterItem {
   priority: ContentPriority;
   sourceBadges: string[];
   flyerRecommended?: boolean;
+  provenance?: ContentSourceReference[];
 }
 
 export interface NewsletterSection {
@@ -175,6 +181,8 @@ export interface NewsletterSection {
     | "principal_note"
     | "flyer";
   items: NewsletterItem[];
+  locked?: boolean;
+  lockedReason?: string;
 }
 
 export interface NewsletterDeliveryMeta {
@@ -194,6 +202,78 @@ export interface NewsletterDraft {
   publishedAt?: string;
   sourceNewsletterId?: string;
   delivery?: NewsletterDeliveryMeta;
+}
+
+export interface ContentSourceReference {
+  id: string;
+  source: WorkspaceSource;
+  label: string;
+  ref?: string;
+}
+
+export interface MembershipToolkitBaseline {
+  id: string;
+  title: string;
+  sourceUrl?: string;
+  sourceLabel: string;
+  discoveredAt: string;
+  retrievedAt: string;
+  retrievalMode: "automatic" | "fallback";
+  note?: string;
+  sections: NewsletterSection[];
+}
+
+export type ProposedNewsletterEditKind =
+  | "add"
+  | "remove"
+  | "modify"
+  | "move"
+  | "keep_locked";
+
+export type ProposedNewsletterEditGroup =
+  | "urgent_schoolwide"
+  | "time_sensitive_events"
+  | "teacher_only"
+  | "evergreen_locked";
+
+export interface ProposedNewsletterEdit {
+  id: string;
+  kind: ProposedNewsletterEditKind;
+  group: ProposedNewsletterEditGroup;
+  title: string;
+  targetSection: string;
+  baselineValue?: string;
+  proposedValue?: string;
+  provenance: ContentSourceReference[];
+  confidence: number;
+  manualReview: boolean;
+  note?: string;
+}
+
+export type MtkRunbookAction =
+  | "duplicate"
+  | "edit"
+  | "test_send"
+  | "publish"
+  | "schedule";
+
+export interface MtkRunbookStep {
+  id: string;
+  title: string;
+  audience: AudienceVersion | "board_review";
+  action: MtkRunbookAction;
+  targetUrl?: string;
+  instructions: string[];
+  requiredOutputs: string[];
+  completionState: "pending" | "completed";
+  note?: string;
+}
+
+export interface ContentWorkspaceState {
+  lastIngestedAt?: string;
+  baseline?: MembershipToolkitBaseline;
+  proposedEdits: ProposedNewsletterEdit[];
+  runbook: MtkRunbookStep[];
 }
 
 export interface FlyerRecommendation {
@@ -280,6 +360,7 @@ export interface DemoState {
   setup: SetupState;
   planner: PlannerState;
   inbox: InboxState;
+  contentWorkspace: ContentWorkspaceState;
   newsletters: {
     board: NewsletterDraft;
     teachers: NewsletterDraft;

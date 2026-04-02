@@ -2,11 +2,17 @@ import { access, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { chromium } from "playwright";
 import type { DemoState, NewsletterDraft } from "@pta-pilot/shared";
+import {
+  resolveMembershipToolkitDraftsUrl,
+  resolveMembershipToolkitDuplicateUrl,
+} from "@pta-pilot/shared";
 import { env } from "../../../config/env";
 import {
+  deriveAudienceDraftTitle,
   duplicateLastNewsletter,
   withNewsletterDelivery,
 } from "../../newsletter/template-engine";
+import { readMembershipToolkitBaseline } from "../baseline-reader";
 import type {
   MembershipToolkitAdapter,
   MembershipToolkitOperationResult,
@@ -24,6 +30,12 @@ async function fileExists(path: string) {
 export class LiveMembershipToolkitAdapter implements MembershipToolkitAdapter {
   async getLastNewsletter(state: DemoState): Promise<NewsletterDraft> {
     return structuredClone(state.newsletters.lastPublishedParent);
+  }
+
+  async getBaseline(state: DemoState) {
+    return readMembershipToolkitBaseline(state, {
+      allowBrowserDiscovery: true,
+    });
   }
 
   private async bootstrapSession() {
@@ -109,14 +121,13 @@ export class LiveMembershipToolkitAdapter implements MembershipToolkitAdapter {
     sourceDraft?: NewsletterDraft,
   ) {
     const source = sourceDraft ?? state.newsletters.lastPublishedParent;
-    const titleMap = {
-      board: "Lincoln PTA Board Review Draft",
-      teachers: "Lincoln PTA Teacher Edition",
-      parents: "Lincoln PTA Parent Newsletter",
-    } as const;
 
     return withNewsletterDelivery(
-      duplicateLastNewsletter(source, audience, titleMap[audience]),
+      duplicateLastNewsletter(
+        source,
+        audience,
+        deriveAudienceDraftTitle(source.title, audience),
+      ),
       {
         lastSyncedAt: new Date().toISOString(),
       },
@@ -130,6 +141,13 @@ export class LiveMembershipToolkitAdapter implements MembershipToolkitAdapter {
   ): Promise<MembershipToolkitOperationResult> {
     const session = await this.bootstrapSession();
     const draft = this.buildDraft(state, audience, sourceDraft);
+    const sourceUrl =
+      audience === "parents"
+        ? state.newsletters.teachers.delivery?.directUrl ??
+          sourceDraft?.delivery?.directUrl ??
+          state.newsletters.lastPublishedParent.delivery?.directUrl
+        : sourceDraft?.delivery?.directUrl ??
+          state.newsletters.lastPublishedParent.delivery?.directUrl;
 
     return {
       draft,
@@ -139,7 +157,10 @@ export class LiveMembershipToolkitAdapter implements MembershipToolkitAdapter {
         type: "duplicate",
         status: "needs_operator",
         note: session.reason,
-        externalUrl: env.MEMBERSHIP_TOOLKIT_BASE_URL,
+        externalUrl: resolveMembershipToolkitDuplicateUrl(
+          sourceUrl,
+          env.MEMBERSHIP_TOOLKIT_BASE_URL,
+        ),
       },
     };
   }
@@ -154,7 +175,7 @@ export class LiveMembershipToolkitAdapter implements MembershipToolkitAdapter {
   }
 
   async publishNewsletter(
-    _state: DemoState,
+    state: DemoState,
     draft: NewsletterDraft,
   ): Promise<MembershipToolkitOperationResult> {
     const session = await this.bootstrapSession();
@@ -167,7 +188,11 @@ export class LiveMembershipToolkitAdapter implements MembershipToolkitAdapter {
         type: "publish",
         status: "needs_operator",
         note: session.reason,
-        externalUrl: env.MEMBERSHIP_TOOLKIT_BASE_URL,
+        externalUrl: resolveMembershipToolkitDraftsUrl(
+          draft.delivery?.directUrl,
+          state.newsletters.lastPublishedParent.delivery?.directUrl,
+          env.MEMBERSHIP_TOOLKIT_BASE_URL,
+        ),
       },
     };
   }
@@ -186,7 +211,10 @@ export class LiveMembershipToolkitAdapter implements MembershipToolkitAdapter {
         type: "schedule",
         status: "needs_operator",
         note: `${session.reason} Schedule for ${scheduledFor} and then confirm the resulting URL or identifier here.`,
-        externalUrl: env.MEMBERSHIP_TOOLKIT_BASE_URL,
+        externalUrl: resolveMembershipToolkitDraftsUrl(
+          draft.delivery?.directUrl,
+          env.MEMBERSHIP_TOOLKIT_BASE_URL,
+        ),
         outputs: {
           scheduledFor,
         },

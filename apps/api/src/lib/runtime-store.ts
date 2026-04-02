@@ -8,6 +8,66 @@ import type {
 } from "@pta-pilot/shared";
 import { seedDemoState } from "@pta-pilot/shared";
 
+const PLACEHOLDER_NEWSLETTER_URL =
+  "https://lincolnpta.membershiptoolkit.com/newsletter/last-week";
+
+function isPlaceholderNewsletterUrl(value: string | undefined) {
+  return value === PLACEHOLDER_NEWSLETTER_URL;
+}
+
+function sanitizePlaceholderNewsletterUrl(state: DemoState): DemoState {
+  const nextState = structuredClone(state);
+
+  nextState.inbox.artifacts = nextState.inbox.artifacts
+    .map((artifact) =>
+      artifact.type === "previous_newsletter_link" &&
+      isPlaceholderNewsletterUrl(artifact.originalUrl)
+        ? {
+            ...artifact,
+            originalUrl: undefined,
+            note:
+              "Placeholder previous-newsletter URL removed. Add the real latest sent Membership Toolkit newsletter URL if auto-discovery is unavailable.",
+          }
+        : artifact,
+    )
+    .filter(
+      (artifact) =>
+        artifact.type !== "previous_newsletter_link" || Boolean(artifact.originalUrl),
+    );
+
+  if (isPlaceholderNewsletterUrl(nextState.newsletters.lastPublishedParent.delivery?.directUrl)) {
+    nextState.newsletters.lastPublishedParent.delivery = {
+      ...(nextState.newsletters.lastPublishedParent.delivery ?? {}),
+      directUrl: undefined,
+      externalId:
+        nextState.newsletters.lastPublishedParent.delivery?.externalId ===
+        "mtk-last-week"
+          ? undefined
+          : nextState.newsletters.lastPublishedParent.delivery?.externalId,
+    };
+  }
+
+  if (
+    nextState.contentWorkspace.baseline &&
+    isPlaceholderNewsletterUrl(nextState.contentWorkspace.baseline.sourceUrl)
+  ) {
+    nextState.contentWorkspace.baseline.sourceUrl = undefined;
+    nextState.contentWorkspace.baseline.note =
+      "Placeholder previous-newsletter URL removed. Add the real latest sent Membership Toolkit newsletter URL or enable live discovery.";
+  }
+
+  nextState.contentWorkspace.runbook = nextState.contentWorkspace.runbook.map((step) =>
+    isPlaceholderNewsletterUrl(step.targetUrl)
+      ? {
+          ...step,
+          targetUrl: undefined,
+        }
+      : step,
+  );
+
+  return nextState;
+}
+
 function mergeWithSeed<T>(seed: T, value: unknown): T {
   if (Array.isArray(seed)) {
     return (Array.isArray(value) ? value : seed) as T;
@@ -140,10 +200,11 @@ export class RuntimeStore {
       const raw = await readFile(this.filePath, "utf-8");
       const parsed = JSON.parse(raw) as DemoState;
       const state = mergeWithSeed(structuredClone(seedDemoState), parsed);
+      const sanitizedState = sanitizePlaceholderNewsletterUrl(state);
 
       return {
-        ...state,
-        approvals: normalizeApprovals(state.approvals),
+        ...sanitizedState,
+        approvals: normalizeApprovals(sanitizedState.approvals),
       };
     } catch {
       const initialState = structuredClone(seedDemoState);

@@ -24,6 +24,42 @@ function buildNewsletterItem(item: ExtractedContentItem): NewsletterItem {
   };
 }
 
+function stripKnownDraftSuffix(title: string) {
+  return title
+    .replace(/\bBoard Review Draft\b/i, "")
+    .replace(/\bTeacher Edition\b/i, "")
+    .replace(/\bParent Newsletter\b/i, "")
+    .replace(/\bNewsletter\b/i, "")
+    .replace(
+      /\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\s*-\s*\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/g,
+      "",
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeDraftBaseTitle(title: string) {
+  const stripped = stripKnownDraftSuffix(title);
+  return stripped || "PTA";
+}
+
+export function deriveAudienceDraftTitle(
+  sourceTitle: string,
+  audience: AudienceVersion,
+) {
+  const baseTitle = normalizeDraftBaseTitle(sourceTitle);
+
+  if (audience === "board") {
+    return `${baseTitle} Board Review Draft`;
+  }
+
+  if (audience === "teachers") {
+    return `${baseTitle} Teacher Edition`;
+  }
+
+  return `${baseTitle} Parent Newsletter`;
+}
+
 export function buildSectionsFromExtracted(
   extractedItems: ExtractedContentItem[],
 ): NewsletterSection[] {
@@ -124,7 +160,7 @@ export function deriveParentDraftFromTeacher(
     ...structuredClone(teacherDraft),
     id: "newsletter-parent-draft",
     audience: "parents",
-    title: "Lincoln PTA Parent Newsletter",
+    title: deriveAudienceDraftTitle(teacherDraft.title, "parents"),
     summary: "Derived from the teacher-approved version for Sunday parent scheduling.",
     status: "draft",
     publishedAt: undefined,

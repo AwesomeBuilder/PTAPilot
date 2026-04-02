@@ -191,20 +191,13 @@ export const seedDemoState: DemoState = {
     ],
     artifacts: [
       {
-        id: "artifact-last-newsletter-link",
-        type: "previous_newsletter_link",
-        label: "Previous newsletter link",
-        createdAt: "2026-03-23T08:04:00-07:00",
-        source: "manual",
-        originalUrl: "https://lincolnpta.membershiptoolkit.com/newsletter/last-week",
-        note: "Used for reminder copy and duplicate-last context until live publish writes direct links automatically.",
-      },
-      {
         id: "artifact-calendar-screenshot",
         type: "calendar_screenshot",
         label: "April calendar screenshot",
         createdAt: "2026-03-24T09:58:00-07:00",
         source: "manual",
+        originalUrl:
+          "https://docs.google.com/drawings/d/1lT_KTCBCwXkMQpv85GfFMMAAmOa6w-j_aK03lcFvvd0/edit",
         fileName: "april-calendar.png",
         mimeType: "image/png",
         storedPath: "apps/api/data/uploads/april-calendar.png",
@@ -277,6 +270,102 @@ export const seedDemoState: DemoState = {
       },
     ],
   },
+  contentWorkspace: {
+    lastIngestedAt: "2026-03-24T10:05:00-07:00",
+    baseline: {
+      id: "baseline-parent-last",
+      title: "Lincoln PTA Parent Newsletter",
+      sourceLabel: "Most recent parent newsletter",
+      discoveredAt: "2026-03-23T08:04:00-07:00",
+      retrievedAt: "2026-03-23T08:04:00-07:00",
+      retrievalMode: "fallback",
+      note:
+        "Add the latest sent Membership Toolkit newsletter URL or enable live MTK discovery to hydrate the baseline from a real parent newsletter.",
+      sections: [
+        {
+          id: "baseline-section-1",
+          title: "From the PTA",
+          kind: "community",
+          items: [
+            {
+              id: "baseline-item-1",
+              title: "Thank you for Jog-a-Thon support",
+              body:
+                "Families raised over $18,000 and helped fund spring enrichment.",
+              priority: "evergreen",
+              sourceBadges: ["Membership Toolkit"],
+              provenance: [
+                {
+                  id: "baseline-ref-1",
+                  source: "membership_toolkit",
+                  label: "Last published parent newsletter",
+                  ref: "newsletter-parent-last",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    proposedEdits: [
+      {
+        id: "proposed-edit-1",
+        kind: "add",
+        group: "urgent_schoolwide",
+        title: "Attendance Spirit Week reminder",
+        targetSection: "Urgent schoolwide items",
+        proposedValue:
+          "Lead with attendance encouragement and Friday coffee chat timing from the principal.",
+        provenance: [
+          {
+            id: "edit-ref-1",
+            source: "imessage",
+            label: "Principal iMessage",
+            ref: "mock-msg-2",
+          },
+        ],
+        confidence: 0.92,
+        manualReview: false,
+        note: "New urgent schoolwide item absent from the last published parent newsletter.",
+      },
+      {
+        id: "proposed-edit-2",
+        kind: "add",
+        group: "time_sensitive_events",
+        title: "STEM Night volunteer ask",
+        targetSection: "Events",
+        proposedValue:
+          "Need 4 setup volunteers and 2 cleanup helpers for Thursday STEM Night.",
+        provenance: [
+          {
+            id: "edit-ref-2",
+            source: "gmail",
+            label: "Gmail reminder reply",
+            ref: "gmail-msg-2",
+          },
+        ],
+        confidence: 0.89,
+        manualReview: true,
+        note: "Human review recommended because this may become a flyer instead of a text item.",
+      },
+    ],
+    runbook: [
+      {
+        id: "runbook-board",
+        title: "Patch the board-review newsletter in Membership Toolkit",
+        audience: "board_review",
+        action: "edit",
+        instructions: [
+          "Duplicate the latest sent newsletter and rename it for this week's board review.",
+          "Add the attendance reminder at the top of the newsletter.",
+          "Replace the time-sensitive events block with the current STEM Night and Book Fair requests.",
+        ],
+        requiredOutputs: ["directUrl", "externalId"],
+        completionState: "pending",
+        note: "Operator completes the MTK patching while PTA Pilot owns the content plan.",
+      },
+    ],
+  },
   newsletters: {
     lastPublishedParent: {
       id: "newsletter-parent-last",
@@ -285,11 +374,7 @@ export const seedDemoState: DemoState = {
       summary: "Last week's published parent edition.",
       status: "published",
       publishedAt: "2026-03-16T18:00:00-07:00",
-      delivery: {
-        directUrl: "https://lincolnpta.membershiptoolkit.com/newsletter/last-week",
-        externalId: "mtk-last-week",
-        lastSyncedAt: "2026-03-16T18:01:00-07:00",
-      },
+      delivery: {},
       sections: [
         {
           id: "section-last-1",

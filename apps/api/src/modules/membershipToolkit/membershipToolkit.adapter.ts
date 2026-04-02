@@ -1,6 +1,7 @@
 import type {
   ApprovalExecutionStep,
   DemoState,
+  MembershipToolkitBaseline,
   NewsletterDraft,
 } from "@pta-pilot/shared";
 import { env } from "../../config/env";
@@ -15,6 +16,7 @@ export interface MembershipToolkitOperationResult {
 
 export interface MembershipToolkitAdapter {
   getLastNewsletter(state: DemoState): Promise<NewsletterDraft>;
+  getBaseline(state: DemoState): Promise<MembershipToolkitBaseline>;
   duplicateNewsletter(
     state: DemoState,
     audience: NewsletterDraft["audience"],
