@@ -252,4 +252,36 @@ describe("DashboardShell", () => {
       "https://simondselementarypta.membershiptoolkit.com/dashboard/newsletters/draft",
     );
   });
+
+  it("posts to the reset endpoint from the test reset control", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => seedDemoState,
+      text: async () => JSON.stringify(seedDemoState),
+    });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => seedDemoState,
+      text: async () => JSON.stringify(seedDemoState),
+    });
+
+    render(
+      <DashboardShell
+        authEnabled={false}
+        gmailConnectUrl="/auth/login"
+        tokenVaultConfigured={false}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /reset test state/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/reset",
+        expect.objectContaining({
+          method: "POST",
+        }),
+      );
+    });
+  });
 });

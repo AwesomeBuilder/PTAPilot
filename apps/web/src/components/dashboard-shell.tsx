@@ -2025,6 +2025,17 @@ export function DashboardShell({
     );
   }
 
+  async function resetTestState() {
+    await runMutation(
+      "Resetting the workflow test state",
+      () =>
+        fetchJson<DemoState>(withUserQuery("/api/reset", user?.sub), {
+          method: "POST",
+        }),
+      "Workflow test state reset to a fresh Monday run.",
+    );
+  }
+
   async function savePlannerStage(stage: WorkflowStage) {
     const nextPlanner = setPlannerCurrentStage(snapshot.planner, stage);
 
@@ -2380,6 +2391,14 @@ export function DashboardShell({
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void resetTestState()}
+                  disabled={isMutating || isRefreshingAuthStatus}
+                >
+                  Reset test state
+                </Button>
                 <Button
                   type="button"
                   variant="outline"
