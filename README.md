@@ -164,39 +164,12 @@ These actions must never happen silently:
 
 The backend models each of those as an approval item and the UI keeps them visible on the right rail and on the Actions Review screen.
 
-## Demo Script
-
-1. Open Setup and show the seeded Auth0 account email, contacts, school breaks, and integration modes.
-2. Move to Inbox, add a mock WhatsApp or iMessage update, then click `Ingest updates`.
-3. Open Newsletter Editor and show:
-   - urgent items placed first
-   - time-sensitive events above evergreen content
-   - flyer recommendation for a visually strong item
-4. Open Actions Review and edit the Wednesday board-review email copy.
-5. Approve the Thursday teacher release or Sunday parent scheduling action.
-6. Open Audit Log and show the resulting approval and execution history.
-7. If live Auth0 + Gmail are configured, log in and show the Gmail status card:
-   - if Gmail is ready, save the Wednesday board-review approval to create a live draft
-   - approve the Wednesday board-review email to send it
-   - if Gmail is not ready, the status note will explain the exact blocker
-
 ## Important Product Behaviors
 
 - PTA Pilot should ask for missing information before high-impact actions.
 - After approval, execution should be smooth and not ask for redundant confirmations.
 - Gmail schedule-send is currently modeled as an app-side scheduled action. The official Gmail docs expose create-draft and send flows; I infer there is no native schedule-send endpoint, so the app intentionally emulates scheduling.
 - Gmail live send is explicit and approval-gated. Draft creation is allowed before approval, but send only happens from the approval step.
-
-## Hackathon Fit
-
-This repo is aimed at the Auth0 Authorized to Act hackathon shape:
-
-- secure delegated access
-- visible human-in-the-loop control
-- clear demo story
-- runnable public repo
-
-Use [TODO.md](TODO.md) for the post-hackathon backlog and [Agent.md](Agent.md) for the product agent rules.
 
 ## References
 
