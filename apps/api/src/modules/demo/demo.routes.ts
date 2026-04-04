@@ -91,6 +91,14 @@ export function createDemoRouter(service: DemoService): ExpressRouter {
     }
   });
 
+  router.post("/reset", async (request, response, next) => {
+    try {
+      response.json(await service.resetWorkflowForTesting(getRequestContext(request)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
   const saveNewsletterHandler = async (
     request: Request,
     response: Response,

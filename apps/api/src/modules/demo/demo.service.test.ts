@@ -264,4 +264,108 @@ describe("DemoService action execution", () => {
     expect(action?.gmailExecution?.lastAction).toBe("draft_saved");
     expect(action?.gmailExecution?.draftId).toBe("fresh-draft-id");
   });
+
+  it("advances from Monday reminder to collect updates after a successful send", async () => {
+    const state = await service.getState();
+    state.setup.integrations.gmail.mode = "mock";
+    state.planner.currentStage = "monday_reminder";
+    state.planner.timeline = state.planner.timeline.map((entry) => ({
+      ...entry,
+      status: entry.stage === "monday_reminder" ? "active" : "upcoming",
+    }));
+    state.approvals = state.approvals.map((approval) =>
+      approval.id === "approval-monday"
+        ? {
+            ...approval,
+            status: "pending",
+            executionStatus: "not_started",
+            steps: approval.steps.map((step) => ({
+              ...step,
+              status: "pending",
+              startedAt: undefined,
+              completedAt: undefined,
+              note: undefined,
+              errorMessage: undefined,
+            })),
+            gmailExecution: undefined,
+          }
+        : approval,
+    );
+    await store.write(state);
+
+    const nextState = await service.approveAction("approval-monday");
+
+    expect(nextState.planner.currentStage).toBe("collect_updates");
+    expect(
+      nextState.planner.timeline.find((entry) => entry.stage === "monday_reminder")
+        ?.status,
+    ).toBe("done");
+    expect(
+      nextState.planner.timeline.find((entry) => entry.stage === "collect_updates")
+        ?.status,
+    ).toBe("active");
+  });
+
+  it("resets the workflow to a fresh Monday test state while preserving setup", async () => {
+    const state = await service.getState();
+    state.planner.currentStage = "thursday_teacher_release";
+    state.planner.timeline = state.planner.timeline.map((entry) => ({
+      ...entry,
+      status: entry.stage === "thursday_teacher_release" ? "active" : "done",
+    }));
+    state.setup.memberRecipients = [
+      {
+        id: "member-test",
+        name: "Taylor Brooks",
+        email: "taylor@example.com",
+      },
+    ];
+    state.newsletters.teachers.status = "published";
+    state.newsletters.teachers.publishedAt = "2026-04-04T09:00:00-07:00";
+    state.newsletters.teachers.delivery = {
+      directUrl: "https://lincolnpta.example/teacher",
+      externalId: "teacher-1",
+      lastSyncedAt: "2026-04-04T09:00:00-07:00",
+    };
+    state.approvals = state.approvals.map((approval) => ({
+      ...approval,
+      status: "approved",
+      executionStatus: "completed",
+      steps: approval.steps.map((step) => ({
+        ...step,
+        status: "completed",
+        startedAt: "2026-04-04T09:00:00-07:00",
+        completedAt: "2026-04-04T09:05:00-07:00",
+        note: "Completed during testing.",
+      })),
+      gmailExecution: {
+        deliveryPath: "mock",
+        lastAction: "sent",
+        sentMessageId: `sent-${approval.id}`,
+        updatedAt: "2026-04-04T09:05:00-07:00",
+      },
+    }));
+    await store.write(state);
+
+    const nextState = await service.resetWorkflowForTesting();
+
+    expect(nextState.planner.currentStage).toBe("monday_reminder");
+    expect(nextState.setup.memberRecipients).toEqual(state.setup.memberRecipients);
+    expect(nextState.newsletters.teachers.status).toBe("draft");
+    expect(nextState.newsletters.teachers.publishedAt).toBeUndefined();
+    expect(nextState.newsletters.teachers.delivery ?? {}).toEqual({});
+    expect(
+      nextState.approvals.every(
+        (approval) =>
+          approval.status === "pending" &&
+          approval.executionStatus === "not_started" &&
+          approval.steps.every((step) => step.status === "pending") &&
+          approval.gmailExecution === undefined,
+      ),
+    ).toBe(true);
+    expect(nextState.auditLog).toHaveLength(1);
+    expect(nextState.auditLog[0]?.summary).toContain(
+      "Reset the workflow to a fresh Monday test state.",
+    );
+  });
 });

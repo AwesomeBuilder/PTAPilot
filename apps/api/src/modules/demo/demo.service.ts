@@ -13,6 +13,7 @@ import type {
   InboxArtifactUploadInput,
   NewsletterDraft,
   SetupUpdateInput,
+  WorkflowStage,
 } from "@pta-pilot/shared";
 import { env } from "../../config/env";
 import type { RequestContext } from "../../lib/request-context";
@@ -116,6 +117,51 @@ function getReusableGmailDraft(approval: ApprovalAction) {
   };
 }
 
+function getStageForApproval(actionId: string): WorkflowStage | null {
+  switch (actionId) {
+    case "approval-monday":
+      return "monday_reminder";
+    case "approval-wednesday":
+      return "wednesday_draft";
+    case "approval-thursday":
+      return "thursday_teacher_release";
+    case "approval-sunday":
+      return "sunday_parent_schedule";
+    default:
+      return null;
+  }
+}
+
+function resetApprovalForTesting(approval: ApprovalAction): ApprovalAction {
+  return {
+    ...approval,
+    status: "pending",
+    executionStatus: "not_started",
+    updatedAt: new Date().toISOString(),
+    gmailExecution: undefined,
+    steps: approval.steps.map((step) => ({
+      ...step,
+      status: "pending",
+      startedAt: undefined,
+      completedAt: undefined,
+      note: undefined,
+      errorMessage: undefined,
+      externalUrl: undefined,
+      outputs: undefined,
+    })),
+  };
+}
+
+function resetNewsletterForTesting(draft: NewsletterDraft): NewsletterDraft {
+  return {
+    ...draft,
+    status: "draft",
+    publishedAt: undefined,
+    scheduledFor: undefined,
+    delivery: undefined,
+  };
+}
+
 export class DemoService {
   private readonly aiService = new GeminiService();
 
@@ -203,6 +249,39 @@ export class DemoService {
         executionStatus: deriveExecutionStatus(steps),
       };
     });
+  }
+
+  private advancePlannerAfterAction(state: DemoState, actionId: string) {
+    const stage = getStageForApproval(actionId);
+
+    if (!stage || state.planner.currentStage !== stage) {
+      return;
+    }
+
+    const action = this.findApproval(state, actionId);
+
+    if (!["completed", "skipped"].includes(action.executionStatus)) {
+      return;
+    }
+
+    const currentIndex = state.planner.timeline.findIndex(
+      (entry) => entry.stage === stage,
+    );
+
+    if (
+      currentIndex === -1 ||
+      currentIndex >= state.planner.timeline.length - 1
+    ) {
+      return;
+    }
+
+    state.planner = refreshPlannerState(
+      {
+        ...state.planner,
+        currentStage: state.planner.timeline[currentIndex + 1]?.stage ?? stage,
+      },
+      state.setup.schoolBreaks,
+    );
   }
 
   private resolveGmailRecipients(state: DemoState, action: ApprovalAction) {
@@ -1183,6 +1262,39 @@ export class DemoService {
     return state;
   }
 
+  async resetWorkflowForTesting(requestContext?: RequestContext): Promise<DemoState> {
+    const state = await this.store.read();
+
+    state.approvals = state.approvals.map(resetApprovalForTesting);
+    state.newsletters.board = resetNewsletterForTesting(state.newsletters.board);
+    state.newsletters.teachers = resetNewsletterForTesting(state.newsletters.teachers);
+    state.newsletters.parents = resetNewsletterForTesting(state.newsletters.parents);
+
+    await this.refreshContentWorkspace(state, requestContext, {
+      recordFailure: false,
+      recordAudit: false,
+      syncGmail: false,
+    });
+
+    state.planner = refreshPlannerState(
+      {
+        ...state.planner,
+        currentStage: "monday_reminder",
+      },
+      state.setup.schoolBreaks,
+    );
+    state.auditLog = [
+      buildAuditEntry(
+        "execution",
+        "planner",
+        "Reset the workflow to a fresh Monday test state.",
+      ),
+    ];
+
+    await this.store.write(state);
+    return state;
+  }
+
   async editApproval(
     actionId: string,
     input: ApprovalEditInput,
@@ -1283,6 +1395,7 @@ export class DemoService {
     );
 
     await this.executeActionWorkflow(state, actionId, requestContext);
+    this.advancePlannerAfterAction(state, actionId);
     await this.store.write(state);
     return state;
   }
@@ -1340,6 +1453,7 @@ export class DemoService {
     );
 
     await this.executeActionWorkflow(state, actionId, requestContext);
+    this.advancePlannerAfterAction(state, actionId);
     await this.store.write(state);
     return state;
   }
@@ -1374,6 +1488,7 @@ export class DemoService {
       syncGmail: false,
     });
     await this.executeActionWorkflow(state, actionId, requestContext);
+    this.advancePlannerAfterAction(state, actionId);
     await this.store.write(state);
     return state;
   }
